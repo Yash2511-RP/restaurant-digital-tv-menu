@@ -18,12 +18,13 @@
         </div>
 
         <nav class="nav-list">
-          <a class="active" href="#dashboard">Dashboard</a>
-          <a href="#bills">Bills</a>
-          <a href="#vendors">Vendors</a>
-          <a href="#cashflow">Cash Flow</a>
-          <a href="#vault">Receipt Vault</a>
-          <a href="#settings">Automation</a>
+          <a class="active" href="#dashboard" data-page="dashboard-page">Dashboard</a>
+          <a href="#bills" data-page="bills-page">Bills</a>
+          <a href="#vendors" data-page="vendors-page">Vendors</a>
+          <a href="#cashflow" data-page="cashflow-page">Cash Flow</a>
+          <a href="#vault" data-page="vault-page">Receipt Vault</a>
+          <a href="#settings" data-page="settings-page">Automation</a>
+          <a href="#assistant" data-page="assistant-page">Assistant</a>
         </nav>
 
         <div class="side-panel">
@@ -45,30 +46,67 @@
           </div>
         </header>
 
-        <section id="dashboard" class="hero-grid" aria-label="Business dashboard">
-          <article class="metric-card primary">
-            <span>Cash balance</span>
-            <strong>$84,260</strong>
-            <p>Projected $71,430 after scheduled bills this week.</p>
-          </article>
-          <article class="metric-card urgent">
-            <span>Due today</span>
-            <strong>$2,840</strong>
-            <p>2 bills waiting for approval.</p>
-          </article>
-          <article class="metric-card">
-            <span>Due this week</span>
-            <strong>$12,830</strong>
-            <p>8 bills across utilities, rent, and suppliers.</p>
-          </article>
-          <article class="metric-card">
-            <span>Monthly spending</span>
-            <strong>$48,920</strong>
-            <p>Utilities are 8% higher than last month.</p>
-          </article>
-        </section>
+        <div id="dashboard-page" class="app-page active-page" data-title="Business Command Center" data-heading="Manage bills, cash, vendors, and payments in one place.">
+          <section id="dashboard" class="hero-grid" aria-label="Business dashboard">
+            <article class="metric-card primary">
+              <span>Cash balance</span>
+              <strong>$84,260</strong>
+              <p>Projected $71,430 after scheduled bills this week.</p>
+            </article>
+            <article class="metric-card urgent">
+              <span>Due today</span>
+              <strong>$2,840</strong>
+              <p>2 bills waiting for approval.</p>
+            </article>
+            <article class="metric-card">
+              <span>Due this week</span>
+              <strong>$12,830</strong>
+              <p>8 bills across utilities, rent, and suppliers.</p>
+            </article>
+            <article class="metric-card">
+              <span>Monthly spending</span>
+              <strong>$48,920</strong>
+              <p>Utilities are 8% higher than last month.</p>
+            </article>
+          </section>
 
-        <section class="content-grid">
+          <section class="content-grid">
+            <article class="panel large">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">AI recommendation</p>
+                  <h2>Today’s CFO Note</h2>
+                </div>
+              </div>
+              <p class="ai-note" id="aiNote">
+                Pay City Electric today and hold Restaurant Supply Co. until Friday. Your projected
+                cash balance stays above the $65,000 threshold after payroll.
+              </p>
+              <div class="recommendation-list">
+                <span>Large bill alerts and unusual vendor charges appear here.</span>
+                <span>Cash projection updates after bills are added or marked paid.</span>
+                <span>Receipt and tax-prep reminders are tracked from saved documents.</span>
+              </div>
+            </article>
+
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Quick actions</p>
+                  <h2>Next Step</h2>
+                </div>
+              </div>
+              <div class="recommendation-list">
+                <span>Open Bills to upload or add an invoice.</span>
+                <span>Open Vendors to manage AutoPay limits.</span>
+                <span>Open Automation to add local account balances.</span>
+              </div>
+            </article>
+          </section>
+        </div>
+
+        <div id="bills-page" class="app-page" data-title="Bills" data-heading="Upload, review, approve, and pay business bills.">
+          <section class="content-grid">
           <article id="bills" class="panel large">
             <div class="panel-header">
               <div>
@@ -95,23 +133,28 @@
           <article class="panel">
             <div class="panel-header">
               <div>
-                <p class="eyebrow">AI recommendation</p>
-                <h2>Today’s CFO Note</h2>
+                <p class="eyebrow">Manual entry</p>
+                <h2>Add a Bill</h2>
               </div>
             </div>
-            <p class="ai-note" id="aiNote">
-              Pay City Electric today and hold Restaurant Supply Co. until Friday. Your projected
-              cash balance stays above the $65,000 threshold after payroll.
-            </p>
-            <div class="recommendation-list">
-              <span>Large bill alert: Internet bill is 23% above normal.</span>
-              <span>Cost-saving opportunity: compare gas supplier contract before renewal.</span>
-              <span>Tax prep: 18 receipts need category confirmation.</span>
-            </div>
+            <form id="billForm" class="data-form stacked" aria-label="Add bill">
+              <select name="vendorId" required aria-label="Vendor"></select>
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
+              <input name="dueDate" type="date" required>
+              <input name="invoiceNumber" type="text" placeholder="Invoice number" required>
+              <select name="status" aria-label="Status">
+                <option value="approval_needed">Approval needed</option>
+                <option value="ready_to_pay">Ready to pay</option>
+                <option value="scheduled">Scheduled</option>
+              </select>
+              <button type="submit">Add Bill</button>
+            </form>
           </article>
         </section>
+        </div>
 
-        <section class="content-grid">
+        <div id="vendors-page" class="app-page" data-title="Vendors" data-heading="Manage vendors, payment methods, schedules, and AutoPay limits.">
+          <section class="content-grid">
           <article id="vendors" class="panel large">
             <div class="panel-header">
               <div>
@@ -133,7 +176,11 @@
 
             <div class="vendor-grid" id="vendorGrid"></div>
           </article>
+          </section>
+        </div>
 
+        <div id="cashflow-page" class="app-page" data-title="Cash Flow" data-heading="See projected cash after upcoming bills and payments.">
+          <section class="content-grid">
           <article id="cashflow" class="panel">
             <div class="panel-header">
               <div>
@@ -159,29 +206,10 @@
             </div>
           </article>
         </section>
+        </div>
 
-        <section class="content-grid">
-          <article class="panel large">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Manual entry</p>
-                <h2>Add a Bill</h2>
-              </div>
-            </div>
-            <form id="billForm" class="data-form" aria-label="Add bill">
-              <select name="vendorId" required aria-label="Vendor"></select>
-              <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
-              <input name="dueDate" type="date" required>
-              <input name="invoiceNumber" type="text" placeholder="Invoice number" required>
-              <select name="status" aria-label="Status">
-                <option value="approval_needed">Approval needed</option>
-                <option value="ready_to_pay">Ready to pay</option>
-                <option value="scheduled">Scheduled</option>
-              </select>
-              <button type="submit">Add Bill</button>
-            </form>
-          </article>
-
+        <div id="settings-page" class="app-page" data-title="Automation" data-heading="Connect local accounts and prepare payment automation settings.">
+          <section class="content-grid">
           <article id="settings" class="panel">
             <div class="panel-header">
               <div>
@@ -201,9 +229,7 @@
               <button type="submit">Save Account</button>
             </form>
           </article>
-        </section>
 
-        <section class="content-grid">
           <article class="panel large">
             <div class="panel-header">
               <div>
@@ -218,8 +244,10 @@
             </div>
           </article>
         </section>
+        </div>
 
-        <section class="content-grid">
+        <div id="vault-page" class="app-page" data-title="Receipt Vault" data-heading="View saved invoices, receipts, and payment confirmations.">
+          <section class="content-grid">
           <article id="vault" class="panel">
             <div class="panel-header">
               <div>
@@ -229,7 +257,11 @@
             </div>
             <ul class="document-list" id="receiptList"></ul>
           </article>
+          </section>
+        </div>
 
+        <div id="assistant-page" class="app-page" data-title="AI Assistant" data-heading="Ask BillPilot about bills, vendors, spending, and projected cash.">
+          <section class="content-grid">
           <article class="panel large assistant-panel">
             <div class="panel-header">
               <div>
@@ -246,6 +278,7 @@
             </form>
           </article>
         </section>
+        </div>
       </main>
     </div>
 

@@ -17,6 +17,10 @@ const uploadReviewForm = document.querySelector("#uploadReviewForm");
 const cancelUploadButton = document.querySelector("#cancelUploadButton");
 const receiptList = document.querySelector("#receiptList");
 const toast = document.querySelector("#toast");
+const navLinks = document.querySelectorAll(".nav-list a[data-page]");
+const appPages = document.querySelectorAll(".app-page");
+const topbarEyebrow = document.querySelector(".topbar .eyebrow");
+const topbarHeading = document.querySelector(".topbar h1");
 
 let vendorsCache = [];
 
@@ -495,6 +499,28 @@ function showToast(message) {
   window.setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
+function showPage(pageId, updateHash = true) {
+  const page = document.querySelector(`#${pageId}`);
+  if (!page) {
+    return;
+  }
+
+  appPages.forEach((item) => item.classList.toggle("active-page", item.id === pageId));
+  navLinks.forEach((link) => link.classList.toggle("active", link.dataset.page === pageId));
+
+  topbarEyebrow.textContent = page.dataset.title || "BillPilot AI";
+  topbarHeading.textContent = page.dataset.heading || "Manage bills, cash, vendors, and payments.";
+
+  if (updateHash) {
+    const activeLink = [...navLinks].find((link) => link.dataset.page === pageId);
+    if (activeLink) {
+      window.history.replaceState(null, "", activeLink.getAttribute("href"));
+    }
+  }
+
+  window.scrollTo({ top: 0, behavior: "smooth" });
+}
+
 function renderDashboard(dashboard) {
   const values = [
     ["Cash balance", dashboard.cashBalance, `Projected ${dashboard.projectedCashAfterWeek} after scheduled bills this week.`],
@@ -614,6 +640,13 @@ form.addEventListener("submit", async (event) => {
   } catch (error) {
     addMessage("I could not reach the BillPilot backend. Start server.py and try again.", "bot");
   }
+});
+
+navLinks.forEach((link) => {
+  link.addEventListener("click", (event) => {
+    event.preventDefault();
+    showPage(link.dataset.page);
+  });
 });
 
 vendorGrid.addEventListener("click", async (event) => {
@@ -739,7 +772,7 @@ accountForm.addEventListener("submit", async (event) => {
 });
 
 connectAccountButton.addEventListener("click", () => {
-  document.querySelector("#settings").scrollIntoView({ behavior: "smooth", block: "start" });
+  showPage("settings-page");
   accountForm.elements.name.focus();
 });
 
@@ -816,3 +849,6 @@ uploadReviewForm.addEventListener("submit", async (event) => {
 loadApp().catch(() => {
   addMessage("Start the backend with python3 server.py to load live BillPilot data.", "bot");
 });
+
+const initialLink = [...navLinks].find((link) => link.getAttribute("href") === window.location.hash);
+showPage(initialLink?.dataset.page || "dashboard-page", false);

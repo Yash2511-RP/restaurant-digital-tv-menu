@@ -214,6 +214,21 @@ main {
   grid-template-columns: minmax(0, 1.45fr) minmax(320px, 0.75fr);
 }
 
+.app-page {
+  display: none;
+}
+
+.app-page.active-page {
+  display: block;
+}
+
+#vendors-page .content-grid,
+#cashflow-page .content-grid,
+#vault-page .content-grid,
+#assistant-page .content-grid {
+  grid-template-columns: 1fr;
+}
+
 .metric-card,
 .panel {
   border: 1px solid var(--line);
