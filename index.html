@@ -109,6 +109,17 @@
               </div>
             </div>
 
+            <form id="vendorForm" class="data-form" aria-label="Add vendor">
+              <input name="companyName" type="text" placeholder="Vendor name" required>
+              <input name="category" type="text" placeholder="Category" required>
+              <input name="accountNumber" type="text" placeholder="Account number">
+              <input name="website" type="url" placeholder="Website">
+              <input name="paymentMethod" type="text" placeholder="Payment method" value="Operating Checking">
+              <input name="paymentSchedule" type="text" placeholder="Payment schedule" value="Manual approval">
+              <input name="maxPayment" type="number" min="0" step="0.01" placeholder="Max payment">
+              <button type="submit">Add Vendor</button>
+            </form>
+
             <div class="vendor-grid" id="vendorGrid"></div>
           </article>
 
@@ -134,6 +145,43 @@
               <span>Thu</span>
               <span>Fri</span>
               <span>Sat</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel large">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Manual entry</p>
+                <h2>Add a Bill</h2>
+              </div>
+            </div>
+            <form id="billForm" class="data-form" aria-label="Add bill">
+              <select name="vendorId" required aria-label="Vendor"></select>
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
+              <input name="dueDate" type="date" required>
+              <input name="invoiceNumber" type="text" placeholder="Invoice number" required>
+              <select name="status" aria-label="Status">
+                <option value="approval_needed">Approval needed</option>
+                <option value="ready_to_pay">Ready to pay</option>
+                <option value="scheduled">Scheduled</option>
+              </select>
+              <button type="submit">Add Bill</button>
+            </form>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Next integrations</p>
+                <h2>Production Path</h2>
+              </div>
+            </div>
+            <div class="recommendation-list">
+              <span>Manual entry first, so real users can test workflows safely.</span>
+              <span>Then Plaid for balances and transactions.</span>
+              <span>Then PDF extraction, approvals, and payment rails.</span>
             </div>
           </article>
         </section>

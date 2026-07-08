@@ -5,6 +5,11 @@ const input = document.querySelector("#assistantInput");
 const chatWindow = document.querySelector("#chatWindow");
 const metricCards = document.querySelectorAll(".metric-card");
 const aiNote = document.querySelector("#aiNote");
+const billForm = document.querySelector("#billForm");
+const vendorForm = document.querySelector("#vendorForm");
+const billVendorSelect = billForm.querySelector("[name='vendorId']");
+
+let vendorsCache = [];
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -62,6 +67,7 @@ function renderBills(bills) {
 }
 
 function renderVendors(vendors) {
+  vendorsCache = vendors;
   vendorGrid.innerHTML = vendors
     .map(
       (vendor) => `
@@ -78,6 +84,10 @@ function renderVendors(vendors) {
         </div>
       `,
     )
+    .join("");
+
+  billVendorSelect.innerHTML = vendors
+    .map((vendor) => `<option value="${vendor.id}">${vendor.name}</option>`)
     .join("");
 }
 
@@ -151,6 +161,51 @@ billList.addEventListener("click", async (event) => {
 
   event.target.disabled = true;
   await api(`/api/bills/${billId}/pay`, { method: "POST" });
+  await loadApp();
+});
+
+vendorForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formData = new FormData(vendorForm);
+
+  await api("/api/vendors", {
+    method: "POST",
+    body: JSON.stringify({
+      companyName: formData.get("companyName"),
+      category: formData.get("category"),
+      accountNumber: formData.get("accountNumber"),
+      website: formData.get("website"),
+      paymentMethod: formData.get("paymentMethod"),
+      paymentSchedule: formData.get("paymentSchedule"),
+      maxPayment: formData.get("maxPayment"),
+    }),
+  });
+
+  vendorForm.reset();
+  vendorForm.elements.paymentMethod.value = "Operating Checking";
+  vendorForm.elements.paymentSchedule.value = "Manual approval";
+  await loadApp();
+});
+
+billForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const formData = new FormData(billForm);
+
+  await api("/api/bills", {
+    method: "POST",
+    body: JSON.stringify({
+      vendorId: formData.get("vendorId"),
+      amount: formData.get("amount"),
+      dueDate: formData.get("dueDate"),
+      invoiceNumber: formData.get("invoiceNumber"),
+      status: formData.get("status"),
+    }),
+  });
+
+  billForm.reset();
+  if (vendorsCache.length) {
+    billVendorSelect.value = vendorsCache[0].id;
+  }
   await loadApp();
 });
 

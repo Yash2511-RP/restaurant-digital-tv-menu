@@ -195,6 +195,16 @@ def money(cents: int) -> str:
     return f"{sign}${value:,.0f}" if cents % 100 == 0 else f"{sign}${value:,.2f}"
 
 
+def cents_from_amount(value: object) -> int:
+    try:
+        amount = float(str(value).replace("$", "").replace(",", "").strip())
+    except ValueError as exc:
+        raise ValueError("Amount must be a number") from exc
+    if amount < 0:
+        raise ValueError("Amount must be positive")
+    return round(amount * 100)
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -297,6 +307,13 @@ def json_body(handler: SimpleHTTPRequestHandler) -> dict:
     return json.loads(raw)
 
 
+def require_text(payload: dict, field: str) -> str:
+    value = str(payload.get(field, "")).strip()
+    if not value:
+        raise ValueError(f"{field} is required")
+    return value
+
+
 class BillPilotHandler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
@@ -309,6 +326,9 @@ class BillPilotHandler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def send_error_json(self, message: str, status: HTTPStatus = HTTPStatus.BAD_REQUEST) -> None:
+        self.send_json({"error": message}, status)
 
     def do_GET(self) -> None:
         path = urlparse(self.path).path
@@ -352,6 +372,85 @@ class BillPilotHandler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
 
         with connect() as conn:
+            if path == "/api/vendors":
+                try:
+                    payload = json_body(self)
+                    company_name = require_text(payload, "companyName")
+                    category = require_text(payload, "category")
+                    account_number = str(payload.get("accountNumber", "")).strip() or "Manual"
+                    website = str(payload.get("website", "")).strip() or "https://example.com"
+                    payment_method = (
+                        str(payload.get("paymentMethod", "")).strip() or "Operating Checking"
+                    )
+                    payment_schedule = (
+                        str(payload.get("paymentSchedule", "")).strip() or "Manual approval"
+                    )
+                    max_payment_cents = cents_from_amount(payload.get("maxPayment") or 0)
+                except ValueError as exc:
+                    self.send_error_json(str(exc))
+                    return
+
+                cursor = conn.execute(
+                    """
+                    INSERT INTO vendors (
+                      company_name, category, account_number, website, autopay_enabled,
+                      payment_method, payment_schedule, max_payment_cents
+                    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?)
+                    """,
+                    (
+                        company_name,
+                        category,
+                        account_number,
+                        website,
+                        payment_method,
+                        payment_schedule,
+                        max_payment_cents,
+                    ),
+                )
+                vendor_id = cursor.lastrowid
+                conn.execute(
+                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
+                    ("vendor_created", f"Vendor {vendor_id} created: {company_name}", utc_now()),
+                )
+                self.send_json({"ok": True, "vendorId": vendor_id}, HTTPStatus.CREATED)
+                return
+
+            if path == "/api/bills":
+                try:
+                    payload = json_body(self)
+                    vendor_id = int(require_text(payload, "vendorId"))
+                    amount_cents = cents_from_amount(require_text(payload, "amount"))
+                    due_date = require_text(payload, "dueDate")
+                    date.fromisoformat(due_date)
+                    invoice_number = require_text(payload, "invoiceNumber")
+                    status = str(payload.get("status", "approval_needed")).strip()
+                    if status not in {"approval_needed", "ready_to_pay", "scheduled"}:
+                        raise ValueError("Unsupported bill status")
+                except ValueError as exc:
+                    self.send_error_json(str(exc))
+                    return
+
+                vendor = conn.execute("SELECT id FROM vendors WHERE id = ?", (vendor_id,)).fetchone()
+                if vendor is None:
+                    self.send_error_json("Vendor not found", HTTPStatus.NOT_FOUND)
+                    return
+
+                cursor = conn.execute(
+                    """
+                    INSERT INTO bills (
+                      vendor_id, amount_cents, due_date, invoice_number, status, source, detected_at
+                    ) VALUES (?, ?, ?, ?, ?, 'manual_entry', ?)
+                    """,
+                    (vendor_id, amount_cents, due_date, invoice_number, status, utc_now()),
+                )
+                bill_id = cursor.lastrowid
+                conn.execute(
+                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
+                    ("bill_created", f"Bill {bill_id} created from manual entry", utc_now()),
+                )
+                self.send_json({"ok": True, "billId": bill_id}, HTTPStatus.CREATED)
+                return
+
             vendor_match = re.fullmatch(r"/api/vendors/(\d+)/autopay", path)
             if vendor_match:
                 payload = json_body(self)

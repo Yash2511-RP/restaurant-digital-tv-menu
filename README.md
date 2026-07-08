@@ -22,6 +22,8 @@ The local MVP includes:
 - Persistent SQLite database
 - Upcoming bill queue backed by API data
 - Vendor AutoPay settings that update through the API
+- Manual vendor creation
+- Manual bill creation tied to saved vendors
 - Simulated bill payment status updates
 - Cash flow forecast
 - Receipt vault preview
