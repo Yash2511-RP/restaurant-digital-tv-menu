@@ -16,6 +16,14 @@ Then open:
 http://127.0.0.1:4173
 ```
 
+Public demo:
+
+```text
+https://yash2511-rp.github.io/BillPilot-AI/
+```
+
+The public GitHub Pages demo uses browser local storage for data because GitHub Pages cannot run the Python/SQLite backend.
+
 The local MVP includes:
 
 - Business cash and bill summary
