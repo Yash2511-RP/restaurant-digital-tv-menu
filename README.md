@@ -24,9 +24,12 @@ The local MVP includes:
 - Vendor AutoPay settings that update through the API
 - Manual vendor creation
 - Manual bill creation tied to saved vendors
+- Local account connection and balance updates
+- Simulated invoice upload and bill detection
+- Batch payment for approved bills
 - Simulated bill payment status updates
 - Cash flow forecast
-- Receipt vault preview
+- Receipt vault backed by saved receipt records
 - AI assistant responses from backend data
 
 The app creates `billpilot.db` automatically on first run.

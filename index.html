@@ -40,8 +40,8 @@
             <h1>Manage bills, cash, vendors, and payments in one place.</h1>
           </div>
           <div class="topbar-actions">
-            <button class="secondary">Connect Account</button>
-            <button>Pay Approved Bills</button>
+            <button id="connectAccountButton" class="secondary">Connect Account</button>
+            <button id="payApprovedButton">Pay Approved Bills</button>
           </div>
         </header>
 
@@ -75,7 +75,8 @@
                 <p class="eyebrow">Bill detection</p>
                 <h2>Upcoming Bills</h2>
               </div>
-              <button class="secondary compact">Upload PDF</button>
+              <button id="uploadPdfButton" class="secondary compact">Upload PDF</button>
+              <input id="invoiceUpload" class="visually-hidden" type="file" accept=".pdf,image/*">
             </div>
 
             <div class="bill-list" id="billList"></div>
@@ -171,7 +172,29 @@
             </form>
           </article>
 
-          <article class="panel">
+          <article id="settings" class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Bank connections</p>
+                <h2>Add Account</h2>
+              </div>
+            </div>
+            <form id="accountForm" class="data-form stacked" aria-label="Add account">
+              <input name="name" type="text" placeholder="Account name" required>
+              <input name="institution" type="text" placeholder="Institution" required>
+              <select name="accountType" aria-label="Account type">
+                <option value="checking">Checking</option>
+                <option value="savings">Savings</option>
+                <option value="credit_card">Credit card</option>
+              </select>
+              <input name="balance" type="number" step="0.01" placeholder="Balance" required>
+              <button type="submit">Save Account</button>
+            </form>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article class="panel large">
             <div class="panel-header">
               <div>
                 <p class="eyebrow">Next integrations</p>
@@ -194,12 +217,7 @@
                 <h2>Recent Documents</h2>
               </div>
             </div>
-            <ul class="document-list">
-              <li><span>City Electric invoice</span><strong>PDF</strong></li>
-              <li><span>Rent payment confirmation</span><strong>Receipt</strong></li>
-              <li><span>Restaurant Supply Co.</span><strong>Invoice</strong></li>
-              <li><span>Water utility statement</span><strong>PDF</strong></li>
-            </ul>
+            <ul class="document-list" id="receiptList"></ul>
           </article>
 
           <article class="panel large assistant-panel">
@@ -221,6 +239,7 @@
       </main>
     </div>
 
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="./app.js"></script>
   </body>
 </html>

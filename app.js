@@ -7,7 +7,14 @@ const metricCards = document.querySelectorAll(".metric-card");
 const aiNote = document.querySelector("#aiNote");
 const billForm = document.querySelector("#billForm");
 const vendorForm = document.querySelector("#vendorForm");
+const accountForm = document.querySelector("#accountForm");
 const billVendorSelect = billForm.querySelector("[name='vendorId']");
+const connectAccountButton = document.querySelector("#connectAccountButton");
+const payApprovedButton = document.querySelector("#payApprovedButton");
+const uploadPdfButton = document.querySelector("#uploadPdfButton");
+const invoiceUpload = document.querySelector("#invoiceUpload");
+const receiptList = document.querySelector("#receiptList");
+const toast = document.querySelector("#toast");
 
 let vendorsCache = [];
 
@@ -21,10 +28,17 @@ async function api(path, options = {}) {
   });
 
   if (!response.ok) {
-    throw new Error(`API request failed: ${response.status}`);
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `API request failed: ${response.status}`);
   }
 
   return response.json();
+}
+
+function showToast(message) {
+  toast.textContent = message;
+  toast.classList.add("show");
+  window.setTimeout(() => toast.classList.remove("show"), 3200);
 }
 
 function renderDashboard(dashboard) {
@@ -91,6 +105,19 @@ function renderVendors(vendors) {
     .join("");
 }
 
+function renderReceipts(receipts) {
+  receiptList.innerHTML = receipts
+    .map(
+      (receipt) => `
+        <li>
+          <span>${receipt.vendor_name}</span>
+          <strong>${receipt.document_type}</strong>
+        </li>
+      `,
+    )
+    .join("");
+}
+
 function addMessage(text, type) {
   const message = document.createElement("div");
   message.className = `message ${type}`;
@@ -100,15 +127,17 @@ function addMessage(text, type) {
 }
 
 async function loadApp() {
-  const [dashboard, bills, vendors] = await Promise.all([
+  const [dashboard, bills, vendors, receipts] = await Promise.all([
     api("/api/dashboard"),
     api("/api/bills"),
     api("/api/vendors"),
+    api("/api/receipts"),
   ]);
 
   renderDashboard(dashboard);
   renderBills(bills);
   renderVendors(vendors);
+  renderReceipts(receipts);
 }
 
 form.addEventListener("submit", async (event) => {
@@ -148,6 +177,7 @@ vendorGrid.addEventListener("click", async (event) => {
       body: JSON.stringify({ enabled }),
     });
     button.classList.toggle("on", enabled);
+    showToast(`AutoPay ${enabled ? "enabled" : "disabled"}.`);
   } finally {
     button.disabled = false;
   }
@@ -162,51 +192,142 @@ billList.addEventListener("click", async (event) => {
   event.target.disabled = true;
   await api(`/api/bills/${billId}/pay`, { method: "POST" });
   await loadApp();
+  showToast("Bill marked paid in local demo mode.");
 });
 
 vendorForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const submitButton = vendorForm.querySelector("button");
+  submitButton.disabled = true;
   const formData = new FormData(vendorForm);
 
-  await api("/api/vendors", {
-    method: "POST",
-    body: JSON.stringify({
-      companyName: formData.get("companyName"),
-      category: formData.get("category"),
-      accountNumber: formData.get("accountNumber"),
-      website: formData.get("website"),
-      paymentMethod: formData.get("paymentMethod"),
-      paymentSchedule: formData.get("paymentSchedule"),
-      maxPayment: formData.get("maxPayment"),
-    }),
-  });
+  try {
+    await api("/api/vendors", {
+      method: "POST",
+      body: JSON.stringify({
+        companyName: formData.get("companyName"),
+        category: formData.get("category"),
+        accountNumber: formData.get("accountNumber"),
+        website: formData.get("website"),
+        paymentMethod: formData.get("paymentMethod"),
+        paymentSchedule: formData.get("paymentSchedule"),
+        maxPayment: formData.get("maxPayment"),
+      }),
+    });
 
-  vendorForm.reset();
-  vendorForm.elements.paymentMethod.value = "Operating Checking";
-  vendorForm.elements.paymentSchedule.value = "Manual approval";
-  await loadApp();
+    vendorForm.reset();
+    vendorForm.elements.paymentMethod.value = "Operating Checking";
+    vendorForm.elements.paymentSchedule.value = "Manual approval";
+    await loadApp();
+    showToast("Vendor saved.");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    submitButton.disabled = false;
+  }
 });
 
 billForm.addEventListener("submit", async (event) => {
   event.preventDefault();
+  const submitButton = billForm.querySelector("button");
+  submitButton.disabled = true;
   const formData = new FormData(billForm);
 
-  await api("/api/bills", {
-    method: "POST",
-    body: JSON.stringify({
-      vendorId: formData.get("vendorId"),
-      amount: formData.get("amount"),
-      dueDate: formData.get("dueDate"),
-      invoiceNumber: formData.get("invoiceNumber"),
-      status: formData.get("status"),
-    }),
-  });
+  try {
+    await api("/api/bills", {
+      method: "POST",
+      body: JSON.stringify({
+        vendorId: formData.get("vendorId"),
+        amount: formData.get("amount"),
+        dueDate: formData.get("dueDate"),
+        invoiceNumber: formData.get("invoiceNumber"),
+        status: formData.get("status"),
+      }),
+    });
 
-  billForm.reset();
-  if (vendorsCache.length) {
-    billVendorSelect.value = vendorsCache[0].id;
+    billForm.reset();
+    if (vendorsCache.length) {
+      billVendorSelect.value = vendorsCache[0].id;
+    }
+    await loadApp();
+    showToast("Bill saved.");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    submitButton.disabled = false;
   }
-  await loadApp();
+});
+
+accountForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submitButton = accountForm.querySelector("button");
+  submitButton.disabled = true;
+  const formData = new FormData(accountForm);
+
+  try {
+    await api("/api/accounts", {
+      method: "POST",
+      body: JSON.stringify({
+        name: formData.get("name"),
+        institution: formData.get("institution"),
+        accountType: formData.get("accountType"),
+        balance: formData.get("balance"),
+      }),
+    });
+    accountForm.reset();
+    await loadApp();
+    showToast("Account connected in local demo mode.");
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    submitButton.disabled = false;
+  }
+});
+
+connectAccountButton.addEventListener("click", () => {
+  document.querySelector("#settings").scrollIntoView({ behavior: "smooth", block: "start" });
+  accountForm.elements.name.focus();
+});
+
+payApprovedButton.addEventListener("click", async () => {
+  payApprovedButton.disabled = true;
+
+  try {
+    const response = await api("/api/pay-approved", { method: "POST" });
+    await loadApp();
+    showToast(`${response.paidCount} approved bill(s) marked paid.`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    payApprovedButton.disabled = false;
+  }
+});
+
+uploadPdfButton.addEventListener("click", () => {
+  invoiceUpload.click();
+});
+
+invoiceUpload.addEventListener("change", async () => {
+  const file = invoiceUpload.files[0];
+  if (!file) {
+    return;
+  }
+
+  uploadPdfButton.disabled = true;
+
+  try {
+    const response = await api("/api/bill-detections", {
+      method: "POST",
+      body: JSON.stringify({ filename: file.name }),
+    });
+    await loadApp();
+    showToast(`Detected ${response.vendor} invoice for ${response.amount}.`);
+  } catch (error) {
+    showToast(error.message);
+  } finally {
+    invoiceUpload.value = "";
+    uploadPdfButton.disabled = false;
+  }
 });
 
 loadApp().catch(() => {

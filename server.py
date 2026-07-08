@@ -205,6 +205,44 @@ def cents_from_amount(value: object) -> int:
     return round(amount * 100)
 
 
+def deduct_from_operating_cash(conn: sqlite3.Connection, amount_cents: int) -> None:
+    account = conn.execute(
+        "SELECT id FROM accounts WHERE account_type IN ('checking', 'savings') ORDER BY id LIMIT 1"
+    ).fetchone()
+    if account is None:
+        return
+    conn.execute(
+        "UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ?",
+        (amount_cents, account["id"]),
+    )
+
+
+def create_payment_receipt(conn: sqlite3.Connection, bill_id: int) -> None:
+    row = conn.execute(
+        """
+        SELECT bills.invoice_number, vendors.company_name
+        FROM bills
+        JOIN vendors ON vendors.id = bills.vendor_id
+        WHERE bills.id = ?
+        """,
+        (bill_id,),
+    ).fetchone()
+    if row is None:
+        return
+    conn.execute(
+        """
+        INSERT INTO receipts (bill_id, vendor_name, document_type, stored_path, created_at)
+        VALUES (?, ?, 'Payment Confirmation', ?, ?)
+        """,
+        (
+            bill_id,
+            row["company_name"],
+            f"/receipts/payment-confirmation-{bill_id}.pdf",
+            utc_now(),
+        ),
+    )
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
 
@@ -339,6 +377,22 @@ class BillPilotHandler(SimpleHTTPRequestHandler):
             if path == "/api/dashboard":
                 self.send_json(dashboard(conn))
                 return
+            if path == "/api/accounts":
+                rows = conn.execute("SELECT * FROM accounts ORDER BY id").fetchall()
+                self.send_json(
+                    [
+                        {
+                            "id": row["id"],
+                            "name": row["name"],
+                            "institution": row["institution"],
+                            "accountType": row["account_type"],
+                            "balance": money(row["balance_cents"]),
+                            "lastSyncedAt": row["last_synced_at"],
+                        }
+                        for row in rows
+                    ]
+                )
+                return
             if path == "/api/bills":
                 self.send_json(bill_rows(conn))
                 return
@@ -372,6 +426,136 @@ class BillPilotHandler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
 
         with connect() as conn:
+            if path == "/api/accounts":
+                try:
+                    payload = json_body(self)
+                    name = require_text(payload, "name")
+                    institution = require_text(payload, "institution")
+                    account_type = require_text(payload, "accountType")
+                    if account_type not in {"checking", "savings", "credit_card"}:
+                        raise ValueError("Unsupported account type")
+                    balance_cents = cents_from_amount(require_text(payload, "balance"))
+                except ValueError as exc:
+                    self.send_error_json(str(exc))
+                    return
+
+                cursor = conn.execute(
+                    """
+                    INSERT INTO accounts (
+                      name, institution, account_type, balance_cents, last_synced_at
+                    ) VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (name, institution, account_type, balance_cents, utc_now()),
+                )
+                account_id = cursor.lastrowid
+                conn.execute(
+                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
+                    ("account_connected", f"Account {account_id} connected: {name}", utc_now()),
+                )
+                self.send_json({"ok": True, "accountId": account_id}, HTTPStatus.CREATED)
+                return
+
+            if path == "/api/pay-approved":
+                rows = conn.execute(
+                    """
+                    SELECT id, amount_cents
+                    FROM bills
+                    WHERE status IN ('ready_to_pay', 'scheduled', 'autopay_on')
+                    """
+                ).fetchall()
+                total_cents = sum(row["amount_cents"] for row in rows)
+                bill_ids = [row["id"] for row in rows]
+
+                if bill_ids:
+                    placeholders = ",".join("?" for _ in bill_ids)
+                    conn.execute(
+                        f"UPDATE bills SET status = 'paid' WHERE id IN ({placeholders})",
+                        bill_ids,
+                    )
+                    deduct_from_operating_cash(conn, total_cents)
+                    for bill_id in bill_ids:
+                        create_payment_receipt(conn, bill_id)
+
+                conn.execute(
+                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
+                    (
+                        "approved_payments_simulated",
+                        f"{len(bill_ids)} approved bill(s) marked paid",
+                        utc_now(),
+                    ),
+                )
+                self.send_json(
+                    {
+                        "ok": True,
+                        "paidCount": len(bill_ids),
+                        "totalPaid": money(total_cents),
+                    }
+                )
+                return
+
+            if path == "/api/bill-detections":
+                try:
+                    payload = json_body(self)
+                    filename = require_text(payload, "filename")
+                except ValueError as exc:
+                    self.send_error_json(str(exc))
+                    return
+
+                vendor_name = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
+                vendor_name = vendor_name.title() or "Uploaded Invoice"
+                vendor = conn.execute(
+                    "SELECT id, company_name FROM vendors WHERE lower(company_name) = lower(?)",
+                    (vendor_name,),
+                ).fetchone()
+                if vendor is None:
+                    cursor = conn.execute(
+                        """
+                        INSERT INTO vendors (
+                          company_name, category, account_number, website, autopay_enabled,
+                          payment_method, payment_schedule, max_payment_cents
+                        ) VALUES (?, 'Uploaded Invoice', 'Detected', 'https://example.com', 0,
+                          'Operating Checking', 'Manual approval', 500000)
+                        """,
+                        (vendor_name,),
+                    )
+                    vendor_id = cursor.lastrowid
+                else:
+                    vendor_id = vendor["id"]
+
+                amount_cents = 25000
+                due_date = (date.today() + timedelta(days=7)).isoformat()
+                invoice_number = f"UPLOAD-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
+                cursor = conn.execute(
+                    """
+                    INSERT INTO bills (
+                      vendor_id, amount_cents, due_date, invoice_number, status, source, detected_at
+                    ) VALUES (?, ?, ?, ?, 'approval_needed', 'pdf_upload', ?)
+                    """,
+                    (vendor_id, amount_cents, due_date, invoice_number, utc_now()),
+                )
+                bill_id = cursor.lastrowid
+                conn.execute(
+                    """
+                    INSERT INTO receipts (bill_id, vendor_name, document_type, stored_path, created_at)
+                    VALUES (?, ?, 'Uploaded Invoice', ?, ?)
+                    """,
+                    (bill_id, vendor_name, f"/receipts/{filename}", utc_now()),
+                )
+                conn.execute(
+                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
+                    ("bill_detected", f"Detected bill {bill_id} from {filename}", utc_now()),
+                )
+                self.send_json(
+                    {
+                        "ok": True,
+                        "billId": bill_id,
+                        "vendor": vendor_name,
+                        "amount": money(amount_cents),
+                    },
+                    HTTPStatus.CREATED,
+                )
+                return
+
             if path == "/api/vendors":
                 try:
                     payload = json_body(self)
@@ -474,6 +658,16 @@ class BillPilotHandler(SimpleHTTPRequestHandler):
             bill_match = re.fullmatch(r"/api/bills/(\d+)/pay", path)
             if bill_match:
                 bill_id = int(bill_match.group(1))
+                bill = conn.execute(
+                    "SELECT amount_cents, status FROM bills WHERE id = ?",
+                    (bill_id,),
+                ).fetchone()
+                if bill is None:
+                    self.send_error_json("Bill not found", HTTPStatus.NOT_FOUND)
+                    return
+                if bill["status"] != "paid":
+                    deduct_from_operating_cash(conn, bill["amount_cents"])
+                    create_payment_receipt(conn, bill_id)
                 conn.execute("UPDATE bills SET status = 'paid' WHERE id = ?", (bill_id,))
                 conn.execute(
                     "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",

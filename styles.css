@@ -64,6 +64,15 @@ button:hover {
   padding: 0.62rem 0.8rem;
 }
 
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
 .app-shell {
   display: grid;
   grid-template-columns: 280px 1fr;
@@ -275,6 +284,10 @@ main {
   white-space: nowrap;
 }
 
+.data-form.stacked {
+  grid-template-columns: 1fr;
+}
+
 .bill-row,
 .vendor-card,
 .document-list li {
@@ -462,6 +475,31 @@ main {
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 0.82rem 0.9rem;
+}
+
+.toast {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 20;
+  max-width: min(420px, calc(100vw - 2rem));
+  border: 1px solid #bfe6cc;
+  border-radius: 8px;
+  background: #102017;
+  color: white;
+  box-shadow: var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(12px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+  padding: 0.85rem 1rem;
+}
+
+.toast.show {
+  opacity: 1;
+  transform: translateY(0);
 }
 
 @media (max-width: 980px) {
