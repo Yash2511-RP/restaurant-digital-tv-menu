@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>BillPilot AI</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Primary navigation">
+        <div class="brand">
+          <div class="brand-mark">BP</div>
+          <div>
+            <strong>BillPilot AI</strong>
+            <span>AI bill operations</span>
+          </div>
+        </div>
+
+        <nav class="nav-list">
+          <a class="active" href="#dashboard">Dashboard</a>
+          <a href="#bills">Bills</a>
+          <a href="#vendors">Vendors</a>
+          <a href="#cashflow">Cash Flow</a>
+          <a href="#vault">Receipt Vault</a>
+          <a href="#settings">Automation</a>
+        </nav>
+
+        <div class="side-panel">
+          <span class="eyebrow">Automation status</span>
+          <strong>12 vendors monitored</strong>
+          <p>AutoPay is enabled for approved vendors with payment limits.</p>
+        </div>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Business Command Center</p>
+            <h1>Manage bills, cash, vendors, and payments in one place.</h1>
+          </div>
+          <div class="topbar-actions">
+            <button class="secondary">Connect Account</button>
+            <button>Pay Approved Bills</button>
+          </div>
+        </header>
+
+        <section id="dashboard" class="hero-grid" aria-label="Business dashboard">
+          <article class="metric-card primary">
+            <span>Cash balance</span>
+            <strong>$84,260</strong>
+            <p>Projected $71,430 after scheduled bills this week.</p>
+          </article>
+          <article class="metric-card urgent">
+            <span>Due today</span>
+            <strong>$2,840</strong>
+            <p>2 bills waiting for approval.</p>
+          </article>
+          <article class="metric-card">
+            <span>Due this week</span>
+            <strong>$12,830</strong>
+            <p>8 bills across utilities, rent, and suppliers.</p>
+          </article>
+          <article class="metric-card">
+            <span>Monthly spending</span>
+            <strong>$48,920</strong>
+            <p>Utilities are 8% higher than last month.</p>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article id="bills" class="panel large">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Bill detection</p>
+                <h2>Upcoming Bills</h2>
+              </div>
+              <button class="secondary compact">Upload PDF</button>
+            </div>
+
+            <div class="bill-list" id="billList"></div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">AI recommendation</p>
+                <h2>Today’s CFO Note</h2>
+              </div>
+            </div>
+            <p class="ai-note" id="aiNote">
+              Pay City Electric today and hold Restaurant Supply Co. until Friday. Your projected
+              cash balance stays above the $65,000 threshold after payroll.
+            </p>
+            <div class="recommendation-list">
+              <span>Large bill alert: Internet bill is 23% above normal.</span>
+              <span>Cost-saving opportunity: compare gas supplier contract before renewal.</span>
+              <span>Tax prep: 18 receipts need category confirmation.</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article id="vendors" class="panel large">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Vendor management</p>
+                <h2>Vendors & AutoPay</h2>
+              </div>
+            </div>
+
+            <div class="vendor-grid" id="vendorGrid"></div>
+          </article>
+
+          <article id="cashflow" class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Forecast</p>
+                <h2>Cash Flow</h2>
+              </div>
+            </div>
+            <div class="chart" aria-label="Cash flow forecast chart">
+              <span style="height: 58%"></span>
+              <span style="height: 72%"></span>
+              <span style="height: 66%"></span>
+              <span style="height: 84%"></span>
+              <span style="height: 61%"></span>
+              <span style="height: 76%"></span>
+            </div>
+            <div class="chart-labels">
+              <span>Mon</span>
+              <span>Tue</span>
+              <span>Wed</span>
+              <span>Thu</span>
+              <span>Fri</span>
+              <span>Sat</span>
+            </div>
+          </article>
+        </section>
+
+        <section class="content-grid">
+          <article id="vault" class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">Receipt Vault</p>
+                <h2>Recent Documents</h2>
+              </div>
+            </div>
+            <ul class="document-list">
+              <li><span>City Electric invoice</span><strong>PDF</strong></li>
+              <li><span>Rent payment confirmation</span><strong>Receipt</strong></li>
+              <li><span>Restaurant Supply Co.</span><strong>Invoice</strong></li>
+              <li><span>Water utility statement</span><strong>PDF</strong></li>
+            </ul>
+          </article>
+
+          <article class="panel large assistant-panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">AI Assistant</p>
+                <h2>Ask BillPilot</h2>
+              </div>
+            </div>
+            <div class="chat-window" id="chatWindow">
+              <div class="message bot">Ask about unpaid invoices, utility spend, due dates, or projected cash.</div>
+            </div>
+            <form id="assistantForm" class="assistant-form">
+              <input id="assistantInput" type="text" placeholder="What bills are due tomorrow?" aria-label="Ask BillPilot AI">
+              <button type="submit">Ask</button>
+            </form>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
