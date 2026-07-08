@@ -13,6 +13,8 @@ const connectAccountButton = document.querySelector("#connectAccountButton");
 const payApprovedButton = document.querySelector("#payApprovedButton");
 const uploadPdfButton = document.querySelector("#uploadPdfButton");
 const invoiceUpload = document.querySelector("#invoiceUpload");
+const uploadReviewForm = document.querySelector("#uploadReviewForm");
+const cancelUploadButton = document.querySelector("#cancelUploadButton");
 const receiptList = document.querySelector("#receiptList");
 const toast = document.querySelector("#toast");
 
@@ -76,6 +78,38 @@ function dueLabel(dateText) {
   if (dateText === tomorrow) return "Tomorrow";
   const date = new Date(`${dateText}T00:00:00`);
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+function cleanFileName(filename) {
+  return filename
+    .replace(/\.[^.]+$/, "")
+    .replaceAll("_", " ")
+    .replaceAll("-", " ")
+    .trim();
+}
+
+function titleCase(value) {
+  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function detectUploadFields(file) {
+  const baseName = cleanFileName(file.name);
+  const amountMatch = baseName.match(/(?:\$|amount\s*)?(\d+(?:\.\d{2})?)/i);
+  const amount = amountMatch?.[1] || "";
+  const vendorName = titleCase(
+    baseName
+      .replace(/\b(inv|invoice|bill|statement|amount)\b/gi, "")
+      .replace(/\d+(?:\.\d{2})?/g, "")
+      .replace(/\s+/g, " ")
+      .trim() || "Uploaded Vendor",
+  );
+
+  return {
+    vendorName,
+    amount,
+    dueDate: addDaysIso(7),
+    invoiceNumber: `UPLOAD-${Date.now()}`,
+  };
 }
 
 function statusLabel(status) {
@@ -361,11 +395,7 @@ async function localApi(path, options = {}) {
   }
 
   if (method === "POST" && path === "/api/bill-detections") {
-    const vendorName = (payload.filename || "Uploaded Invoice")
-      .replace(/\.[^.]+$/, "")
-      .replaceAll("_", " ")
-      .replaceAll("-", " ")
-      .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    const vendorName = payload.vendorName || titleCase(cleanFileName(payload.filename || "Uploaded Invoice"));
     let vendor = data.vendors.find((item) => item.name.toLowerCase() === vendorName.toLowerCase());
     if (!vendor) {
       vendor = {
@@ -384,9 +414,9 @@ async function localApi(path, options = {}) {
     const bill = {
       id: data.nextBillId++,
       vendorId: vendor.id,
-      amountCents: 25000,
-      dueDate: addDaysIso(7),
-      invoice: `UPLOAD-${Date.now()}`,
+      amountCents: centsFromAmount(payload.amount || 250),
+      dueDate: payload.dueDate || addDaysIso(7),
+      invoice: payload.invoiceNumber || `UPLOAD-${Date.now()}`,
       status: "approval_needed",
       source: "pdf_upload",
     };
@@ -731,26 +761,55 @@ uploadPdfButton.addEventListener("click", () => {
   invoiceUpload.click();
 });
 
-invoiceUpload.addEventListener("change", async () => {
+invoiceUpload.addEventListener("change", () => {
   const file = invoiceUpload.files[0];
   if (!file) {
     return;
   }
 
-  uploadPdfButton.disabled = true;
+  const detected = detectUploadFields(file);
+  uploadReviewForm.elements.filename.value = file.name;
+  uploadReviewForm.elements.vendorName.value = detected.vendorName;
+  uploadReviewForm.elements.amount.value = detected.amount;
+  uploadReviewForm.elements.dueDate.value = detected.dueDate;
+  uploadReviewForm.elements.invoiceNumber.value = detected.invoiceNumber;
+  uploadReviewForm.classList.remove("hidden");
+  uploadReviewForm.elements.vendorName.focus();
+  showToast("Review the detected bill details, then save.");
+});
+
+cancelUploadButton.addEventListener("click", () => {
+  uploadReviewForm.reset();
+  uploadReviewForm.classList.add("hidden");
+  invoiceUpload.value = "";
+});
+
+uploadReviewForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const submitButton = uploadReviewForm.querySelector("button[type='submit']");
+  submitButton.disabled = true;
+  const formData = new FormData(uploadReviewForm);
 
   try {
     const response = await api("/api/bill-detections", {
       method: "POST",
-      body: JSON.stringify({ filename: file.name }),
+      body: JSON.stringify({
+        filename: formData.get("filename"),
+        vendorName: formData.get("vendorName"),
+        amount: formData.get("amount"),
+        dueDate: formData.get("dueDate"),
+        invoiceNumber: formData.get("invoiceNumber"),
+      }),
     });
     await loadApp();
-    showToast(`Detected ${response.vendor} invoice for ${response.amount}.`);
+    uploadReviewForm.reset();
+    uploadReviewForm.classList.add("hidden");
+    invoiceUpload.value = "";
+    showToast(`Saved ${response.vendor} invoice for ${response.amount}.`);
   } catch (error) {
     showToast(error.message);
   } finally {
-    invoiceUpload.value = "";
-    uploadPdfButton.disabled = false;
+    submitButton.disabled = false;
   }
 });
 

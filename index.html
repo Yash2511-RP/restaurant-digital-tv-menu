@@ -79,6 +79,16 @@
               <input id="invoiceUpload" class="visually-hidden" type="file" accept=".pdf,image/*">
             </div>
 
+            <form id="uploadReviewForm" class="data-form upload-review hidden" aria-label="Review uploaded bill">
+              <input name="filename" type="text" readonly aria-label="Uploaded file name">
+              <input name="vendorName" type="text" placeholder="Vendor detected" required>
+              <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
+              <input name="dueDate" type="date" required>
+              <input name="invoiceNumber" type="text" placeholder="Invoice number" required>
+              <button type="submit">Save Uploaded Bill</button>
+              <button type="button" class="secondary" id="cancelUploadButton">Cancel</button>
+            </form>
+
             <div class="bill-list" id="billList"></div>
           </article>
 

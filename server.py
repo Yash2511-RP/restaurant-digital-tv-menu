@@ -497,11 +497,17 @@ class BillPilotHandler(SimpleHTTPRequestHandler):
                 try:
                     payload = json_body(self)
                     filename = require_text(payload, "filename")
+                    amount_cents = cents_from_amount(require_text(payload, "amount"))
+                    due_date = require_text(payload, "dueDate")
+                    date.fromisoformat(due_date)
+                    invoice_number = require_text(payload, "invoiceNumber")
                 except ValueError as exc:
                     self.send_error_json(str(exc))
                     return
 
-                vendor_name = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
+                vendor_name = str(payload.get("vendorName", "")).strip()
+                if not vendor_name:
+                    vendor_name = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
                 vendor_name = vendor_name.title() or "Uploaded Invoice"
                 vendor = conn.execute(
                     "SELECT id, company_name FROM vendors WHERE lower(company_name) = lower(?)",
@@ -522,9 +528,6 @@ class BillPilotHandler(SimpleHTTPRequestHandler):
                 else:
                     vendor_id = vendor["id"]
 
-                amount_cents = 25000
-                due_date = (date.today() + timedelta(days=7)).isoformat()
-                invoice_number = f"UPLOAD-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
                 cursor = conn.execute(
                     """
                     INSERT INTO bills (
