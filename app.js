@@ -15,6 +15,7 @@ const uploadPdfButton = document.querySelector("#uploadPdfButton");
 const invoiceUpload = document.querySelector("#invoiceUpload");
 const uploadReviewForm = document.querySelector("#uploadReviewForm");
 const cancelUploadButton = document.querySelector("#cancelUploadButton");
+const readInvoiceTextButton = document.querySelector("#readInvoiceTextButton");
 const receiptList = document.querySelector("#receiptList");
 const toast = document.querySelector("#toast");
 const navLinks = document.querySelectorAll(".nav-list a[data-page]");
@@ -96,6 +97,10 @@ function titleCase(value) {
   return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function lastItem(items) {
+  return items.length ? items[items.length - 1] : undefined;
+}
+
 function parseDateToIso(value) {
   if (!value) {
     return "";
@@ -135,7 +140,7 @@ function extractInvoiceTextFields(text) {
   ];
   const amount =
     amountPatterns.map((pattern) => normalized.match(pattern)?.[1]).find(Boolean) ||
-    [...normalized.matchAll(/\$\s*([\d,]+(?:\.\d{2})?)/g)].at(-1)?.[1] ||
+    lastItem([...normalized.matchAll(/\$\s*([\d,]+(?:\.\d{2})?)/g)])?.[1] ||
     "";
 
   const datePatterns = [
@@ -163,6 +168,21 @@ function extractInvoiceTextFields(text) {
     dueDate,
     invoiceNumber,
   };
+}
+
+function fillUploadReviewFields(detected) {
+  if (detected.vendorName) {
+    uploadReviewForm.elements.vendorName.value = detected.vendorName;
+  }
+  if (detected.amount) {
+    uploadReviewForm.elements.amount.value = detected.amount;
+  }
+  if (detected.dueDate) {
+    uploadReviewForm.elements.dueDate.value = detected.dueDate;
+  }
+  if (detected.invoiceNumber) {
+    uploadReviewForm.elements.invoiceNumber.value = detected.invoiceNumber;
+  }
 }
 
 async function readUploadText(file) {
@@ -889,18 +909,26 @@ invoiceUpload.addEventListener("change", async () => {
   const detected = await detectUploadFields(file);
   uploadReviewForm.elements.filename.value = file.name;
   uploadReviewForm.elements.rawText.value = detected.rawText;
-  uploadReviewForm.elements.vendorName.value = detected.vendorName;
-  uploadReviewForm.elements.amount.value = detected.amount;
-  uploadReviewForm.elements.dueDate.value = detected.dueDate;
-  uploadReviewForm.elements.invoiceNumber.value = detected.invoiceNumber;
+  fillUploadReviewFields(detected);
   uploadReviewForm.classList.remove("hidden");
-  uploadReviewForm.elements.vendorName.focus();
+  uploadReviewForm.elements.rawText.focus();
   uploadPdfButton.disabled = false;
 
   if (detected.rawText && detected.vendorName && detected.amount && detected.dueDate) {
     showToast("AI read vendor, amount, and due date. Review before saving.");
   } else {
-    showToast("AI filled what it could. Review missing fields before saving.");
+    showToast("Paste invoice text and tap AI Read Text if fields are missing.");
+  }
+});
+
+readInvoiceTextButton.addEventListener("click", () => {
+  const detected = extractInvoiceTextFields(uploadReviewForm.elements.rawText.value);
+  fillUploadReviewFields(detected);
+
+  if (detected.vendorName || detected.amount || detected.dueDate || detected.invoiceNumber) {
+    showToast("AI read the invoice text. Review before saving.");
+  } else {
+    showToast("I could not find vendor, amount, or due date. Try pasting clearer invoice text.");
   }
 });
 

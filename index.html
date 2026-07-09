@@ -119,7 +119,8 @@
 
             <form id="uploadReviewForm" class="data-form upload-review hidden" aria-label="Review uploaded bill">
               <input name="filename" type="text" readonly aria-label="Uploaded file name">
-              <input name="rawText" type="hidden">
+              <textarea name="rawText" class="full-span" rows="5" placeholder="Paste invoice text here, then tap AI Read Text. Example: Vendor, Amount Due, Due Date, Invoice Number."></textarea>
+              <button type="button" id="readInvoiceTextButton">AI Read Text</button>
               <input name="vendorName" type="text" placeholder="Vendor detected" required>
               <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
               <input name="dueDate" type="date" required>
