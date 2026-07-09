@@ -2,6 +2,8 @@
 
 A local MVP for managing restaurant menu content from a laptop and displaying different menu layouts on one or more TVs.
 
+Admins can manage multiple restaurant locations from the same dashboard. Each location has its own categories, menu items, TV screens, and display URLs.
+
 ## Run Locally
 
 ```bash
@@ -19,11 +21,14 @@ Example TV display URLs:
 ```text
 http://127.0.0.1:4173/display/main-tv
 http://127.0.0.1:4173/display/drinks-tv
+http://127.0.0.1:4173/display/uptown-main-tv
 ```
 
 ## Included MVP Features
 
 - Admin dashboard with menu, category, and TV counts
+- Multi-location admin access with a location switcher
+- Location CRUD with name, address, and phone
 - Menu item CRUD with price, category, image URL, sort order, and stock status
 - Category CRUD with sort order
 - Multi-TV screen profiles with unique slugs

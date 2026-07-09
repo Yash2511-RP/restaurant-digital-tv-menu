@@ -1,7 +1,9 @@
 const state = {
+  locations: [],
   categories: [],
   items: [],
   tvs: [],
+  activeLocationId: null,
   activeTvId: null,
   activeDisplay: null,
 };
@@ -9,12 +11,14 @@ const state = {
 const adminApp = document.querySelector("#adminApp");
 const displayApp = document.querySelector("#displayApp");
 const toast = document.querySelector("#toast");
+const activeLocationSelect = document.querySelector("#activeLocationSelect");
 const activeTvSelect = document.querySelector("#activeTvSelect");
 const activeTvLink = document.querySelector("#activeTvLink");
 const openDisplayLink = document.querySelector("#openDisplayLink");
 const pageEyebrow = document.querySelector("#pageEyebrow");
 const pageHeading = document.querySelector("#pageHeading");
 
+const locationForm = document.querySelector("#locationForm");
 const menuItemForm = document.querySelector("#menuItemForm");
 const categoryForm = document.querySelector("#categoryForm");
 const tvForm = document.querySelector("#tvForm");
@@ -73,15 +77,27 @@ function categoryName(id) {
   return state.categories.find((category) => category.id === id)?.name || "Uncategorized";
 }
 
+function getActiveLocation() {
+  return state.locations.find((location) => location.id === state.activeLocationId) || state.locations[0];
+}
+
 function getActiveTv() {
   return state.tvs.find((tv) => tv.id === state.activeTvId) || state.tvs[0];
 }
 
 async function loadAdminData() {
+  const locations = await api("/api/locations");
+  state.locations = locations;
+
+  if (!state.activeLocationId || !state.locations.some((location) => location.id === state.activeLocationId)) {
+    state.activeLocationId = state.locations[0]?.id || null;
+  }
+
+  const locationParam = state.activeLocationId ? `?location_id=${encodeURIComponent(state.activeLocationId)}` : "";
   const [categories, items, tvs] = await Promise.all([
-    api("/api/categories"),
-    api("/api/menu-items"),
-    api("/api/tv-screens"),
+    api(`/api/categories${locationParam}`),
+    api(`/api/menu-items${locationParam}`),
+    api(`/api/tv-screens${locationParam}`),
   ]);
 
   state.categories = categories;
@@ -96,6 +112,8 @@ async function loadAdminData() {
 }
 
 function renderAdmin() {
+  renderLocationSelect();
+  renderLocations();
   renderTvSelect();
   renderDashboard();
   renderMenuItems();
@@ -105,6 +123,15 @@ function renderAdmin() {
   renderTvFormChoices();
   loadDesignForm();
   renderPreviews();
+}
+
+function renderLocationSelect() {
+  activeLocationSelect.innerHTML = state.locations
+    .map(
+      (location) =>
+        `<option value="${location.id}" ${location.id === state.activeLocationId ? "selected" : ""}>${escapeHtml(location.name)}</option>`,
+    )
+    .join("");
 }
 
 function renderTvSelect() {
@@ -125,6 +152,7 @@ function renderTvSelect() {
 }
 
 function renderDashboard() {
+  document.querySelector("#locationCount").textContent = state.locations.length;
   document.querySelector("#itemCount").textContent = state.items.length;
   document.querySelector("#categoryCount").textContent = state.categories.length;
   document.querySelector("#tvCount").textContent = state.tvs.length;
@@ -137,6 +165,24 @@ function renderDashboard() {
         <div>
           <strong>${escapeHtml(item.name)} <span class="price">${money.format(item.price)}</span></strong>
           <span>${escapeHtml(categoryName(item.category_id))} - ${item.available ? "In stock" : "Out of stock"}</span>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderLocations() {
+  document.querySelector("#locationList").innerHTML = state.locations
+    .map(
+      (location) => `
+        <div>
+          <strong>${escapeHtml(location.name)}</strong>
+          <span>${escapeHtml(location.address || "No address")} ${location.phone ? `- ${escapeHtml(location.phone)}` : ""}</span>
+          <div class="row-actions">
+            <button class="secondary" data-action="select-location" data-id="${location.id}">Select</button>
+            <button class="secondary" data-action="edit-location" data-id="${location.id}">Edit</button>
+            <button data-action="delete-location" data-id="${location.id}">Delete</button>
+          </div>
         </div>
       `,
     )
@@ -343,6 +389,7 @@ function renderTvItem(item, tv, settings, itemSize, priceSize) {
 
 function serializeMenuItemForm() {
   return {
+    location_id: state.activeLocationId,
     name: menuItemForm.elements.name.value.trim(),
     description: menuItemForm.elements.description.value.trim(),
     category_id: menuItemForm.elements.category_id.value,
@@ -355,6 +402,7 @@ function serializeMenuItemForm() {
 
 function serializeCategoryForm() {
   return {
+    location_id: state.activeLocationId,
     name: categoryForm.elements.name.value.trim(),
     sort_order: Number(categoryForm.elements.sort_order.value || 0),
   };
@@ -364,12 +412,21 @@ function serializeTvForm() {
   const categoryIds = [...tvForm.querySelectorAll("[name='category_ids']:checked")].map((input) => input.value);
   const itemIds = [...tvForm.querySelectorAll("[name='item_ids']:checked")].map((input) => input.value);
   return {
+    location_id: state.activeLocationId,
     name: tvForm.elements.name.value.trim(),
     slug: slugify(tvForm.elements.slug.value || tvForm.elements.name.value),
     show_images: tvForm.elements.show_images.checked,
     show_sold_out: tvForm.elements.show_sold_out.checked,
     category_ids: categoryIds,
     item_ids: itemIds,
+  };
+}
+
+function serializeLocationForm() {
+  return {
+    name: locationForm.elements.name.value.trim(),
+    address: locationForm.elements.address.value.trim(),
+    phone: locationForm.elements.phone.value.trim(),
   };
 }
 
@@ -396,6 +453,12 @@ function resetMenuForm() {
   document.querySelector("#menuFormTitle").textContent = "New Item";
 }
 
+function resetLocationForm() {
+  locationForm.reset();
+  locationForm.elements.id.value = "";
+  document.querySelector("#locationFormTitle").textContent = "New Location";
+}
+
 function resetCategoryForm() {
   categoryForm.reset();
   categoryForm.elements.id.value = "";
@@ -419,6 +482,35 @@ document.body.addEventListener("click", async (event) => {
   const { action, id } = trigger.dataset;
 
   try {
+    if (action === "select-location") {
+      state.activeLocationId = id;
+      state.activeTvId = null;
+      resetLocationForm();
+      resetMenuForm();
+      resetCategoryForm();
+      resetTvForm();
+      await loadAdminData();
+    }
+
+    if (action === "edit-location") {
+      const location = state.locations.find((entry) => entry.id === id);
+      locationForm.elements.id.value = location.id;
+      locationForm.elements.name.value = location.name;
+      locationForm.elements.address.value = location.address || "";
+      locationForm.elements.phone.value = location.phone || "";
+      document.querySelector("#locationFormTitle").textContent = "Edit Location";
+    }
+
+    if (action === "delete-location" && window.confirm("Delete this location and all of its menus and TVs?")) {
+      await api(`/api/locations/${id}`, { method: "DELETE" });
+      if (state.activeLocationId === id) {
+        state.activeLocationId = null;
+        state.activeTvId = null;
+      }
+      showToast("Location deleted");
+      await loadAdminData();
+    }
+
     if (action === "edit-item") {
       const item = state.items.find((entry) => entry.id === id);
       menuItemForm.elements.id.value = item.id;
@@ -490,6 +582,20 @@ document.body.addEventListener("click", async (event) => {
   }
 });
 
+locationForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = locationForm.elements.id.value;
+  const saved = await api(id ? `/api/locations/${id}` : "/api/locations", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(serializeLocationForm()),
+  });
+  state.activeLocationId = saved.id;
+  state.activeTvId = null;
+  resetLocationForm();
+  showToast("Location saved");
+  await loadAdminData();
+});
+
 menuItemForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const id = menuItemForm.elements.id.value;
@@ -541,8 +647,18 @@ designForm.addEventListener("submit", async (event) => {
 });
 
 document.querySelector("#resetMenuForm").addEventListener("click", resetMenuForm);
+document.querySelector("#resetLocationForm").addEventListener("click", resetLocationForm);
 document.querySelector("#resetCategoryForm").addEventListener("click", resetCategoryForm);
 document.querySelector("#resetTvForm").addEventListener("click", resetTvForm);
+
+activeLocationSelect.addEventListener("change", async () => {
+  state.activeLocationId = activeLocationSelect.value;
+  state.activeTvId = null;
+  resetMenuForm();
+  resetCategoryForm();
+  resetTvForm();
+  await loadAdminData();
+});
 
 activeTvSelect.addEventListener("change", async () => {
   state.activeTvId = activeTvSelect.value;

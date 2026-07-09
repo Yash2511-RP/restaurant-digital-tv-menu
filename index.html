@@ -19,6 +19,7 @@
 
         <nav class="nav-list">
           <a class="active" href="#dashboard" data-page="dashboard">Dashboard</a>
+          <a href="#locations" data-page="locations">Locations</a>
           <a href="#menu-items" data-page="menu-items">Menu Items</a>
           <a href="#categories" data-page="categories">Categories</a>
           <a href="#tv-screens" data-page="tv-screens">TV Screens</a>
@@ -40,6 +41,7 @@
             <h1 id="pageHeading">Manage menus, TVs, and display design.</h1>
           </div>
           <div class="topbar-actions">
+            <select id="activeLocationSelect" aria-label="Active restaurant location"></select>
             <select id="activeTvSelect" aria-label="Active TV screen"></select>
             <a id="openDisplayLink" class="button secondary" target="_blank" rel="noreferrer">Open TV</a>
           </div>
@@ -47,6 +49,11 @@
 
         <section id="dashboard-page" class="app-page active-page" data-title="Admin Dashboard" data-heading="Manage menus, TVs, and display design.">
           <div class="metric-grid">
+            <article class="metric-card">
+              <span>Locations</span>
+              <strong id="locationCount">0</strong>
+              <p>Restaurant locations this admin can manage.</p>
+            </article>
             <article class="metric-card">
               <span>Menu items</span>
               <strong id="itemCount">0</strong>
@@ -91,6 +98,36 @@
                 <div><strong>2. Add menu items</strong><span>Use image URLs for food photos.</span></div>
                 <div><strong>3. Assign TVs</strong><span>Choose categories and design settings.</span></div>
               </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="locations-page" class="app-page" data-title="Location Manager" data-heading="Switch between restaurant locations and manage their menus independently.">
+          <div class="content-grid">
+            <article class="panel large">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Admin access</p>
+                  <h2>Locations</h2>
+                </div>
+              </div>
+              <div id="locationList" class="compact-list"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Add or edit</p>
+                  <h2 id="locationFormTitle">New Location</h2>
+                </div>
+              </div>
+              <form id="locationForm" class="data-form stacked">
+                <input type="hidden" name="id">
+                <input name="name" type="text" placeholder="Location name" required>
+                <input name="address" type="text" placeholder="Address">
+                <input name="phone" type="tel" placeholder="Phone">
+                <button type="submit">Save Location</button>
+                <button id="resetLocationForm" class="secondary" type="button">Clear</button>
+              </form>
             </article>
           </div>
         </section>

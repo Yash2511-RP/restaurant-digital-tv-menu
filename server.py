@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent
 DB_PATH = ROOT / "restaurant_menu.db"
@@ -60,12 +60,33 @@ def require(payload: dict, *fields: str) -> None:
         raise ValueError(f"Missing required field: {', '.join(missing)}")
 
 
+def column_exists(conn: sqlite3.Connection, table: str, column: str) -> bool:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    return any(row["name"] == column for row in rows)
+
+
+def ensure_location_columns(conn: sqlite3.Connection, location_id: str) -> None:
+    for table in ("categories", "menu_items", "tv_screens"):
+        if not column_exists(conn, table, "location_id"):
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN location_id TEXT")
+        conn.execute(f"UPDATE {table} SET location_id = ? WHERE location_id IS NULL", (location_id,))
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS locations (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              address TEXT NOT NULL DEFAULT '',
+              phone TEXT NOT NULL DEFAULT '',
+              created_at TEXT NOT NULL
+            );
+
             CREATE TABLE IF NOT EXISTS categories (
               id TEXT PRIMARY KEY,
+              location_id TEXT REFERENCES locations(id) ON DELETE CASCADE,
               name TEXT NOT NULL,
               sort_order INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL
@@ -73,6 +94,7 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS menu_items (
               id TEXT PRIMARY KEY,
+              location_id TEXT REFERENCES locations(id) ON DELETE CASCADE,
               name TEXT NOT NULL,
               description TEXT NOT NULL DEFAULT '',
               category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
@@ -86,6 +108,7 @@ def init_db() -> None:
 
             CREATE TABLE IF NOT EXISTS tv_screens (
               id TEXT PRIMARY KEY,
+              location_id TEXT REFERENCES locations(id) ON DELETE CASCADE,
               name TEXT NOT NULL,
               slug TEXT NOT NULL UNIQUE,
               show_images INTEGER NOT NULL DEFAULT 1,
@@ -124,11 +147,29 @@ def init_db() -> None:
             """
         )
 
+        created = now()
+        location_count = conn.execute("SELECT COUNT(*) FROM locations").fetchone()[0]
+        if location_count:
+            default_location_id = conn.execute("SELECT id FROM locations ORDER BY created_at LIMIT 1").fetchone()["id"]
+        else:
+            default_location_id = new_id()
+            conn.execute(
+                """
+                INSERT INTO locations (id, name, address, phone, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (default_location_id, "Downtown Location", "100 Main Street", "(555) 010-1000", created),
+            )
+
+        ensure_location_columns(conn, default_location_id)
+
         count = conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
         if count:
+            uptown_exists = conn.execute("SELECT 1 FROM tv_screens WHERE slug = ?", ("uptown-main-tv",)).fetchone()
+            if not uptown_exists:
+                seed_second_location(conn, created)
             return
 
-        created = now()
         categories = [
             ("Breakfast", 1),
             ("Signature Plates", 2),
@@ -140,8 +181,8 @@ def init_db() -> None:
             category_id = new_id()
             category_ids[name] = category_id
             conn.execute(
-                "INSERT INTO categories (id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
-                (category_id, name, sort_order, created),
+                "INSERT INTO categories (id, location_id, name, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+                (category_id, default_location_id, name, sort_order, created),
             )
 
         items = [
@@ -158,12 +199,13 @@ def init_db() -> None:
             conn.execute(
                 """
                 INSERT INTO menu_items (
-                  id, name, description, category_id, price, image_url, available,
+                  id, location_id, name, description, category_id, price, image_url, available,
                   sort_order, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     new_id(),
+                    default_location_id,
                     name,
                     description,
                     category_ids[category],
@@ -189,6 +231,7 @@ def init_db() -> None:
                 """,
                 (tv_id, name, slug, created),
             )
+            conn.execute("UPDATE tv_screens SET location_id = ? WHERE id = ?", (default_location_id, tv_id))
             insert_default_settings(conn, tv_id)
             for category_name in category_names:
                 conn.execute(
@@ -199,8 +242,74 @@ def init_db() -> None:
                     (new_id(), tv_id, category_ids[category_name]),
                 )
 
+        seed_second_location(conn, created)
 
-def insert_default_settings(conn: sqlite3.Connection, tv_screen_id: str) -> None:
+
+def seed_second_location(conn: sqlite3.Connection, created: str) -> None:
+    location_id = new_id()
+    conn.execute(
+        """
+        INSERT INTO locations (id, name, address, phone, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (location_id, "Uptown Location", "220 Market Avenue", "(555) 010-2200", created),
+    )
+
+    category_ids: dict[str, str] = {}
+    for name, sort_order in [("Lunch", 1), ("Coffee Bar", 2), ("Grab & Go", 3)]:
+        category_id = new_id()
+        category_ids[name] = category_id
+        conn.execute(
+            "INSERT INTO categories (id, location_id, name, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+            (category_id, location_id, name, sort_order, created),
+        )
+
+    items = [
+        ("Turkey Club", "Roasted turkey, bacon, tomato, lettuce, garlic aioli.", "Lunch", 12.50, "https://images.unsplash.com/photo-1528735602780-2552fd46c7af?auto=format&fit=crop&w=600&q=80", 1, 1),
+        ("Market Salad", "Greens, roasted vegetables, feta, lemon vinaigrette.", "Lunch", 10.75, "https://images.unsplash.com/photo-1512621776951-a57141f2eefd?auto=format&fit=crop&w=600&q=80", 1, 2),
+        ("Cold Brew", "Slow-steeped coffee served over ice.", "Coffee Bar", 4.75, "https://images.unsplash.com/photo-1461023058943-07fcbe16d735?auto=format&fit=crop&w=600&q=80", 1, 1),
+        ("Blueberry Muffin", "Bakery muffin with lemon sugar crumble.", "Grab & Go", 3.95, "https://images.unsplash.com/photo-1607958996333-41aef7caefaa?auto=format&fit=crop&w=600&q=80", 1, 1),
+    ]
+    for name, description, category, price, image_url, available, sort_order in items:
+        conn.execute(
+            """
+            INSERT INTO menu_items (
+              id, location_id, name, description, category_id, price, image_url, available,
+              sort_order, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                new_id(),
+                location_id,
+                name,
+                description,
+                category_ids[category],
+                price,
+                image_url,
+                available,
+                sort_order,
+                created,
+                created,
+            ),
+        )
+
+    tv_id = new_id()
+    conn.execute(
+        """
+        INSERT INTO tv_screens (id, location_id, name, slug, show_images, show_sold_out, created_at)
+        VALUES (?, ?, ?, ?, 1, 1, ?)
+        """,
+        (tv_id, location_id, "Uptown Main TV", "uptown-main-tv", created),
+    )
+    insert_default_settings(conn, tv_id, "Harbor Table Uptown")
+    for category_id in category_ids.values():
+        conn.execute(
+            "INSERT INTO tv_screen_categories (id, tv_screen_id, category_id) VALUES (?, ?, ?)",
+            (new_id(), tv_id, category_id),
+        )
+
+
+def insert_default_settings(conn: sqlite3.Connection, tv_screen_id: str, restaurant_name: str = "Harbor Table") -> None:
     conn.execute(
         """
         INSERT INTO display_settings (
@@ -211,7 +320,7 @@ def insert_default_settings(conn: sqlite3.Connection, tv_screen_id: str) -> None
         (
             new_id(),
             tv_screen_id,
-            "Harbor Table",
+            restaurant_name,
             "#1f1713",
             "#fff7ed",
             "#f2b84b",
@@ -225,13 +334,36 @@ def insert_default_settings(conn: sqlite3.Connection, tv_screen_id: str) -> None
     )
 
 
-def list_categories(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute("SELECT * FROM categories ORDER BY sort_order, name").fetchall()
+def get_location_id(handler: SimpleHTTPRequestHandler) -> str | None:
+    query = parse_qs(urlparse(handler.path).query)
+    value = query.get("location_id", [None])[0]
+    return value or None
+
+
+def list_locations(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM locations ORDER BY created_at, name").fetchall()
     return [dict(row) for row in rows]
 
 
-def list_menu_items(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute("SELECT * FROM menu_items ORDER BY sort_order, name").fetchall()
+def list_categories(conn: sqlite3.Connection, location_id: str | None = None) -> list[dict]:
+    if location_id:
+        rows = conn.execute(
+            "SELECT * FROM categories WHERE location_id = ? ORDER BY sort_order, name",
+            (location_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM categories ORDER BY sort_order, name").fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_menu_items(conn: sqlite3.Connection, location_id: str | None = None) -> list[dict]:
+    if location_id:
+        rows = conn.execute(
+            "SELECT * FROM menu_items WHERE location_id = ? ORDER BY sort_order, name",
+            (location_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM menu_items ORDER BY sort_order, name").fetchall()
     return [normalize_item(row) for row in rows]
 
 
@@ -262,8 +394,11 @@ def normalize_tv(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
     return tv
 
 
-def list_tvs(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute("SELECT * FROM tv_screens ORDER BY rowid").fetchall()
+def list_tvs(conn: sqlite3.Connection, location_id: str | None = None) -> list[dict]:
+    if location_id:
+        rows = conn.execute("SELECT * FROM tv_screens WHERE location_id = ? ORDER BY rowid", (location_id,)).fetchall()
+    else:
+        rows = conn.execute("SELECT * FROM tv_screens ORDER BY rowid").fetchall()
     return [normalize_tv(conn, row) for row in rows]
 
 
@@ -300,12 +435,14 @@ class Handler(SimpleHTTPRequestHandler):
     def do_GET(self) -> None:
         path = urlparse(self.path).path
         try:
+            if path == "/api/locations":
+                return self.send_json(list_locations(connect()))
             if path == "/api/categories":
-                return self.send_json(list_categories(connect()))
+                return self.send_json(list_categories(connect(), get_location_id(self)))
             if path == "/api/menu-items":
-                return self.send_json(list_menu_items(connect()))
+                return self.send_json(list_menu_items(connect(), get_location_id(self)))
             if path == "/api/tv-screens":
-                return self.send_json(list_tvs(connect()))
+                return self.send_json(list_tvs(connect(), get_location_id(self)))
             if match := re.fullmatch(r"/api/tv-screens/([^/]+)/settings", path):
                 with connect() as conn:
                     settings = get_settings(conn, match.group(1))
@@ -324,6 +461,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             payload = parse_json(self)
+            if path == "/api/locations":
+                return self.create_location(payload)
             if path == "/api/categories":
                 return self.create_category(payload)
             if path == "/api/menu-items":
@@ -340,6 +479,8 @@ class Handler(SimpleHTTPRequestHandler):
         path = urlparse(self.path).path
         try:
             payload = parse_json(self)
+            if match := re.fullmatch(r"/api/locations/([^/]+)", path):
+                return self.update_location(match.group(1), payload)
             if match := re.fullmatch(r"/api/categories/([^/]+)", path):
                 return self.update_category(match.group(1), payload)
             if match := re.fullmatch(r"/api/menu-items/([^/]+)", path):
@@ -367,6 +508,8 @@ class Handler(SimpleHTTPRequestHandler):
     def do_DELETE(self) -> None:
         path = urlparse(self.path).path
         try:
+            if match := re.fullmatch(r"/api/locations/([^/]+)", path):
+                return self.delete_row("locations", match.group(1))
             if match := re.fullmatch(r"/api/categories/([^/]+)", path):
                 return self.delete_row("categories", match.group(1))
             if match := re.fullmatch(r"/api/menu-items/([^/]+)", path):
@@ -377,13 +520,56 @@ class Handler(SimpleHTTPRequestHandler):
         except Exception as exc:  # noqa: BLE001
             return self.send_error_json(str(exc), HTTPStatus.INTERNAL_SERVER_ERROR)
 
-    def create_category(self, payload: dict) -> None:
+    def create_location(self, payload: dict) -> None:
         require(payload, "name")
+        with connect() as conn:
+            location_id = new_id()
+            conn.execute(
+                """
+                INSERT INTO locations (id, name, address, phone, created_at)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (
+                    location_id,
+                    payload["name"].strip(),
+                    payload.get("address", "").strip(),
+                    payload.get("phone", "").strip(),
+                    now(),
+                ),
+            )
+            row = conn.execute("SELECT * FROM locations WHERE id = ?", (location_id,)).fetchone()
+        self.send_json(dict(row), HTTPStatus.CREATED)
+
+    def update_location(self, location_id: str, payload: dict) -> None:
+        require(payload, "name")
+        with connect() as conn:
+            conn.execute(
+                "UPDATE locations SET name = ?, address = ?, phone = ? WHERE id = ?",
+                (
+                    payload["name"].strip(),
+                    payload.get("address", "").strip(),
+                    payload.get("phone", "").strip(),
+                    location_id,
+                ),
+            )
+            row = conn.execute("SELECT * FROM locations WHERE id = ?", (location_id,)).fetchone()
+        if not row:
+            return self.send_error_json("Location not found", HTTPStatus.NOT_FOUND)
+        self.send_json(dict(row))
+
+    def create_category(self, payload: dict) -> None:
+        require(payload, "location_id", "name")
         with connect() as conn:
             category_id = new_id()
             conn.execute(
-                "INSERT INTO categories (id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
-                (category_id, payload["name"].strip(), int(payload.get("sort_order") or 0), now()),
+                "INSERT INTO categories (id, location_id, name, sort_order, created_at) VALUES (?, ?, ?, ?, ?)",
+                (
+                    category_id,
+                    payload["location_id"],
+                    payload["name"].strip(),
+                    int(payload.get("sort_order") or 0),
+                    now(),
+                ),
             )
             row = conn.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
         self.send_json(dict(row), HTTPStatus.CREATED)
@@ -401,19 +587,20 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json(dict(row))
 
     def create_menu_item(self, payload: dict) -> None:
-        require(payload, "name", "category_id", "price")
+        require(payload, "location_id", "name", "category_id", "price")
         timestamp = now()
         with connect() as conn:
             item_id = new_id()
             conn.execute(
                 """
                 INSERT INTO menu_items (
-                  id, name, description, category_id, price, image_url, available,
+                  id, location_id, name, description, category_id, price, image_url, available,
                   sort_order, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_id,
+                    payload["location_id"],
                     payload["name"].strip(),
                     payload.get("description", "").strip(),
                     payload["category_id"],
@@ -469,17 +656,18 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_json(normalize_item(row))
 
     def create_tv(self, payload: dict) -> None:
-        require(payload, "name")
+        require(payload, "location_id", "name")
         tv_id = new_id()
         slug = slugify(payload.get("slug") or payload["name"])
         with connect() as conn:
             conn.execute(
                 """
-                INSERT INTO tv_screens (id, name, slug, show_images, show_sold_out, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO tv_screens (id, location_id, name, slug, show_images, show_sold_out, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     tv_id,
+                    payload["location_id"],
                     payload["name"].strip(),
                     slug,
                     bool_row(payload.get("show_images", True)),
@@ -561,8 +749,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_error_json("TV display not found", HTTPStatus.NOT_FOUND)
             tv = normalize_tv(conn, row)
             settings = get_settings(conn, tv["id"])
-            categories = list_categories(conn)
-            items = list_menu_items(conn)
+            categories = list_categories(conn, tv["location_id"])
+            items = list_menu_items(conn, tv["location_id"])
 
         allowed_categories = set(tv["category_ids"])
         pinned_items = set(tv["item_ids"])
@@ -572,7 +760,7 @@ class Handler(SimpleHTTPRequestHandler):
             items = [item for item in items if item["category_id"] in allowed_categories]
 
         if pinned_items:
-            pinned = [item for item in list_menu_items(connect()) if item["id"] in pinned_items]
+            pinned = [item for item in list_menu_items(connect(), tv["location_id"]) if item["id"] in pinned_items]
             by_id = {item["id"]: item for item in items}
             for item in pinned:
                 by_id[item["id"]] = item
