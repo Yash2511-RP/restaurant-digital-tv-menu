@@ -85,6 +85,13 @@ function getActiveTv() {
   return state.tvs.find((tv) => tv.id === state.activeTvId) || state.tvs[0];
 }
 
+function goToPage(page) {
+  const link = document.querySelector(`.nav-list a[data-page="${page}"]`);
+  if (link) {
+    link.click();
+  }
+}
+
 async function loadAdminData() {
   const locations = await api("/api/locations");
   state.locations = locations;
@@ -152,19 +159,83 @@ function renderTvSelect() {
 }
 
 function renderDashboard() {
+  const location = getActiveLocation();
   document.querySelector("#locationCount").textContent = state.locations.length;
   document.querySelector("#itemCount").textContent = state.items.length;
   document.querySelector("#categoryCount").textContent = state.categories.length;
   document.querySelector("#tvCount").textContent = state.tvs.length;
   document.querySelector("#soldOutCount").textContent = state.items.filter((item) => !item.available).length;
+  document.querySelector("#dashboardLocationName").textContent = location?.name || "No location selected";
+  document.querySelector("#dashboardLocationDetails").innerHTML = location
+    ? `
+      <div>
+        <strong>${escapeHtml(location.address || "No address saved")}</strong>
+        <span>${escapeHtml(location.phone || "No phone saved")}</span>
+      </div>
+      <div>
+        <strong>${state.categories.length} categories, ${state.items.length} items</strong>
+        <span>${state.tvs.length} TV screens for this location</span>
+      </div>
+    `
+    : `<div><strong>No locations yet</strong><span>Add a location to start building menus.</span></div>`;
 
-  document.querySelector("#dashboardItemList").innerHTML = state.items
-    .slice(0, 8)
-    .map(
-      (item) => `
+  document.querySelector("#dashboardItemList").innerHTML = state.items.length
+    ? state.items
+        .slice(0, 8)
+        .map(
+          (item) => `
         <div>
           <strong>${escapeHtml(item.name)} <span class="price">${money.format(item.price)}</span></strong>
           <span>${escapeHtml(categoryName(item.category_id))} - ${item.available ? "In stock" : "Out of stock"}</span>
+          <div class="row-actions">
+            <button class="secondary" data-action="edit-item" data-id="${item.id}">Edit</button>
+            <button class="secondary" data-action="toggle-stock" data-id="${item.id}">${item.available ? "Mark out" : "Restock"}</button>
+          </div>
+        </div>
+      `,
+        )
+        .join("")
+    : `<div><strong>No menu items yet</strong><span>Add a category and menu item for this location.</span></div>`;
+
+  document.querySelector("#dashboardTvList").innerHTML = state.tvs.length
+    ? state.tvs
+        .map(
+          (tv) => `
+        <article class="tv-card">
+          <div class="tv-card-head">
+            <div>
+              <strong>${escapeHtml(tv.name)}</strong>
+              <div class="tv-url">${window.location.origin}/display/${escapeHtml(tv.slug)}</div>
+            </div>
+            <span class="pill ${tv.show_sold_out ? "ok" : "sold"}">${tv.show_sold_out ? "Sold out visible" : "Sold out hidden"}</span>
+          </div>
+          <p class="muted">${tv.category_ids.length || "All"} categories assigned, ${tv.item_ids.length} pinned items.</p>
+          <div class="row-actions">
+            <button class="secondary" data-action="select-tv" data-id="${tv.id}">Preview</button>
+            <a class="button secondary" href="/display/${tv.slug}" target="_blank" rel="noreferrer">Open TV</a>
+          </div>
+        </article>
+      `,
+        )
+        .join("")
+    : `<article class="tv-card"><strong>No TV screens yet</strong><p class="muted">Create a TV screen to generate a display URL.</p></article>`;
+
+  const checklist = [
+    { ok: Boolean(location), label: "Location selected", page: "locations" },
+    { ok: state.categories.length > 0, label: "At least one category", page: "categories" },
+    { ok: state.items.length > 0, label: "At least one menu item", page: "menu-items" },
+    { ok: state.tvs.length > 0, label: "At least one TV screen", page: "tv-screens" },
+    { ok: Boolean(getActiveTv()), label: "Preview is ready", page: "preview" },
+  ];
+  document.querySelector("#dashboardChecklist").innerHTML = checklist
+    .map(
+      (entry) => `
+        <div>
+          <strong><span class="check-dot ${entry.ok ? "ok" : "todo"}"></span>${entry.label}</strong>
+          <span>${entry.ok ? "Ready" : "Needs setup"}</span>
+          <div class="row-actions">
+            <button class="secondary" data-action="go-page" data-page="${entry.page}">${entry.ok ? "View" : "Set up"}</button>
+          </div>
         </div>
       `,
     )
@@ -482,6 +553,10 @@ document.body.addEventListener("click", async (event) => {
   const { action, id } = trigger.dataset;
 
   try {
+    if (action === "go-page") {
+      goToPage(trigger.dataset.page);
+    }
+
     if (action === "select-location") {
       state.activeLocationId = id;
       state.activeTvId = null;
@@ -557,6 +632,7 @@ document.body.addEventListener("click", async (event) => {
     if (action === "select-tv") {
       state.activeTvId = id;
       renderAdmin();
+      showToast("TV selected for preview");
     }
 
     if (action === "edit-tv") {

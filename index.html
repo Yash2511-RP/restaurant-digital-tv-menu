@@ -83,21 +83,47 @@
                   <p class="eyebrow">Recent menu state</p>
                   <h2>Kitchen Board</h2>
                 </div>
+                <button class="secondary compact-action" data-action="go-page" data-page="menu-items">Manage Items</button>
               </div>
               <div id="dashboardItemList" class="compact-list"></div>
             </article>
             <article class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Quick setup</p>
-                  <h2>Next Steps</h2>
+                  <p class="eyebrow">Current location</p>
+                  <h2 id="dashboardLocationName">Location</h2>
                 </div>
               </div>
-              <div class="compact-list">
-                <div><strong>1. Add categories</strong><span>Breakfast, entrees, drinks, specials.</span></div>
-                <div><strong>2. Add menu items</strong><span>Use image URLs for food photos.</span></div>
-                <div><strong>3. Assign TVs</strong><span>Choose categories and design settings.</span></div>
+              <div id="dashboardLocationDetails" class="compact-list"></div>
+              <div class="dashboard-actions">
+                <button class="secondary" data-action="go-page" data-page="locations">Locations</button>
+                <button class="secondary" data-action="go-page" data-page="categories">Categories</button>
+                <button class="secondary" data-action="go-page" data-page="menu-items">Menu Items</button>
+                <button class="secondary" data-action="go-page" data-page="tv-screens">TV Screens</button>
+                <button data-action="go-page" data-page="design-settings">Design</button>
               </div>
+            </article>
+          </div>
+
+          <div class="content-grid dashboard-lower">
+            <article class="panel large">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">TV links</p>
+                  <h2>Display Screens</h2>
+                </div>
+                <button class="secondary compact-action" data-action="go-page" data-page="tv-screens">Manage TVs</button>
+              </div>
+              <div id="dashboardTvList" class="tv-grid"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Setup health</p>
+                  <h2>Checklist</h2>
+                </div>
+              </div>
+              <div id="dashboardChecklist" class="compact-list"></div>
             </article>
           </div>
         </section>
