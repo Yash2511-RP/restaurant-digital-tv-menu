@@ -1,39 +1,31 @@
-const billList = document.querySelector("#billList");
-const vendorGrid = document.querySelector("#vendorGrid");
-const form = document.querySelector("#assistantForm");
-const input = document.querySelector("#assistantInput");
-const chatWindow = document.querySelector("#chatWindow");
-const metricCards = document.querySelectorAll(".metric-card");
-const aiNote = document.querySelector("#aiNote");
-const billForm = document.querySelector("#billForm");
-const vendorForm = document.querySelector("#vendorForm");
-const accountForm = document.querySelector("#accountForm");
-const billVendorSelect = billForm.querySelector("[name='vendorId']");
-const connectAccountButton = document.querySelector("#connectAccountButton");
-const payApprovedButton = document.querySelector("#payApprovedButton");
-const uploadPdfButton = document.querySelector("#uploadPdfButton");
-const invoiceUpload = document.querySelector("#invoiceUpload");
-const uploadReviewForm = document.querySelector("#uploadReviewForm");
-const cancelUploadButton = document.querySelector("#cancelUploadButton");
-const readInvoiceTextButton = document.querySelector("#readInvoiceTextButton");
-const receiptList = document.querySelector("#receiptList");
+const state = {
+  categories: [],
+  items: [],
+  tvs: [],
+  activeTvId: null,
+  activeDisplay: null,
+};
+
+const adminApp = document.querySelector("#adminApp");
+const displayApp = document.querySelector("#displayApp");
 const toast = document.querySelector("#toast");
-const navLinks = document.querySelectorAll(".nav-list a[data-page]");
-const appPages = document.querySelectorAll(".app-page");
-const topbarEyebrow = document.querySelector(".topbar .eyebrow");
-const topbarHeading = document.querySelector(".topbar h1");
+const activeTvSelect = document.querySelector("#activeTvSelect");
+const activeTvLink = document.querySelector("#activeTvLink");
+const openDisplayLink = document.querySelector("#openDisplayLink");
+const pageEyebrow = document.querySelector("#pageEyebrow");
+const pageHeading = document.querySelector("#pageHeading");
 
-let vendorsCache = [];
+const menuItemForm = document.querySelector("#menuItemForm");
+const categoryForm = document.querySelector("#categoryForm");
+const tvForm = document.querySelector("#tvForm");
+const designForm = document.querySelector("#designForm");
 
-const LOCAL_STORAGE_KEY = "billpilot.local.v1";
-const useLocalMode =
-  window.location.hostname.endsWith("github.io") || window.location.protocol === "file:";
+const money = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "USD",
+});
 
 async function api(path, options = {}) {
-  if (useLocalMode) {
-    return localApi(path, options);
-  }
-
   const response = await fetch(path, {
     headers: {
       "Content-Type": "application/json",
@@ -44,1005 +36,577 @@ async function api(path, options = {}) {
 
   if (!response.ok) {
     const payload = await response.json().catch(() => ({}));
-    throw new Error(payload.error || `API request failed: ${response.status}`);
+    throw new Error(payload.error || `Request failed with ${response.status}`);
+  }
+
+  if (response.status === 204) {
+    return null;
   }
 
   return response.json();
 }
 
-function formatMoney(cents) {
-  const sign = cents < 0 ? "-" : "";
-  const value = Math.abs(cents) / 100;
-  return cents % 100 === 0
-    ? `${sign}$${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
-    : `${sign}$${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function centsFromAmount(value) {
-  const amount = Number(String(value || "0").replace("$", "").replace(",", ""));
-  if (Number.isNaN(amount) || amount < 0) {
-    throw new Error("Amount must be a positive number.");
-  }
-  return Math.round(amount * 100);
-}
-
-function todayIso() {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function addDaysIso(days) {
-  const next = new Date();
-  next.setDate(next.getDate() + days);
-  return next.toISOString().slice(0, 10);
-}
-
-function dueLabel(dateText) {
-  const today = todayIso();
-  const tomorrow = addDaysIso(1);
-  if (dateText === today) return "Today";
-  if (dateText === tomorrow) return "Tomorrow";
-  const date = new Date(`${dateText}T00:00:00`);
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
-}
-
-function cleanFileName(filename) {
-  return filename
-    .replace(/\.[^.]+$/, "")
-    .replaceAll("_", " ")
-    .replaceAll("-", " ")
-    .trim();
-}
-
-function titleCase(value) {
-  return value.replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function lastItem(items) {
-  return items.length ? items[items.length - 1] : undefined;
-}
-
-function parseDateToIso(value) {
-  if (!value) {
-    return "";
-  }
-
-  const cleaned = value.replace(/,/g, "").trim();
-  const numeric = cleaned.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})$/);
-  if (numeric) {
-    const year = numeric[3].length === 2 ? `20${numeric[3]}` : numeric[3];
-    return `${year}-${numeric[1].padStart(2, "0")}-${numeric[2].padStart(2, "0")}`;
-  }
-
-  const iso = cleaned.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-  if (iso) {
-    return `${iso[1]}-${iso[2].padStart(2, "0")}-${iso[3].padStart(2, "0")}`;
-  }
-
-  const parsed = new Date(cleaned);
-  if (Number.isNaN(parsed.getTime())) {
-    const withYear = new Date(`${cleaned} ${new Date().getFullYear()}`);
-    return Number.isNaN(withYear.getTime()) ? "" : withYear.toISOString().slice(0, 10);
-  }
-
-  return parsed.toISOString().slice(0, 10);
-}
-
-function extractInvoiceTextFields(text) {
-  const normalized = text.replace(/\r/g, "\n").replace(/[ \t]+/g, " ");
-  const lines = normalized
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean);
-
-  const amountPatterns = [
-    /(?:amount\s+due|total\s+due|balance\s+due|payment\s+due)[^\d$]{0,30}\$?\s*([\d,]+(?:\.\d{2})?)/i,
-    /(?:invoice\s+total|total|amount)[^\d$]{0,30}\$?\s*([\d,]+(?:\.\d{2})?)/i,
-  ];
-  const amount =
-    amountPatterns.map((pattern) => normalized.match(pattern)?.[1]).find(Boolean) ||
-    lastItem([...normalized.matchAll(/\$\s*([\d,]+(?:\.\d{2})?)/g)])?.[1] ||
-    "";
-
-  const datePatterns = [
-    /(?:due\s+date|payment\s+due|due\s+by)[^\w]{0,20}([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})/i,
-    /\b([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|\d{4}-\d{1,2}-\d{1,2})\b/i,
-  ];
-  const dueDate = parseDateToIso(datePatterns.map((pattern) => normalized.match(pattern)?.[1]).find(Boolean));
-
-  const invoiceNumber =
-    normalized.match(/(?:invoice\s*(?:number|no\.?|#)|inv\s*#)[^\w-]{0,12}([A-Z0-9-]+)/i)?.[1] ||
-    `UPLOAD-${Date.now()}`;
-
-  const vendorLine =
-    lines.find((line) => /^vendor\s*:/i.test(line))?.replace(/^vendor\s*:\s*/i, "") ||
-    lines.find(
-      (line) =>
-        line.length <= 60 &&
-        !/(invoice|statement|amount|total|balance|date|due|account|page|bill\s+to|ship\s+to)/i.test(line) &&
-        /[A-Za-z]/.test(line),
-    );
-
-  return {
-    vendorName: vendorLine ? titleCase(vendorLine) : "",
-    amount: amount.replace(/,/g, ""),
-    dueDate,
-    invoiceNumber,
-  };
-}
-
-function fillUploadReviewFields(detected) {
-  if (detected.vendorName) {
-    uploadReviewForm.elements.vendorName.value = detected.vendorName;
-  }
-  if (detected.amount) {
-    uploadReviewForm.elements.amount.value = detected.amount;
-  }
-  if (detected.dueDate) {
-    uploadReviewForm.elements.dueDate.value = detected.dueDate;
-  }
-  if (detected.invoiceNumber) {
-    uploadReviewForm.elements.invoiceNumber.value = detected.invoiceNumber;
-  }
-}
-
-async function readUploadText(file) {
-  if (file.size > 2_000_000 || file.type.startsWith("image/")) {
-    return "";
-  }
-
-  try {
-    return await file.text();
-  } catch (error) {
-    return "";
-  }
-}
-
-async function detectUploadFields(file) {
-  const baseName = cleanFileName(file.name);
-  const amountMatch = baseName.match(/(?:\$|amount\s*)?(\d+(?:\.\d{2})?)/i);
-  const rawText = await readUploadText(file);
-  const extracted = extractInvoiceTextFields(rawText);
-  const fallbackVendorName = titleCase(
-    baseName
-      .replace(/\b(inv|invoice|bill|statement|amount)\b/gi, "")
-      .replace(/\d+(?:\.\d{2})?/g, "")
-      .replace(/\s+/g, " ")
-      .trim() || "Uploaded Vendor",
-  );
-
-  return {
-    vendorName: extracted.vendorName || fallbackVendorName,
-    amount: extracted.amount || amountMatch?.[1] || "",
-    dueDate: extracted.dueDate || addDaysIso(7),
-    invoiceNumber: extracted.invoiceNumber || `UPLOAD-${Date.now()}`,
-    rawText,
-  };
-}
-
-function statusLabel(status) {
-  const labels = {
-    approval_needed: "Approval needed",
-    ready_to_pay: "Ready to pay",
-    scheduled: "Scheduled",
-    autopay_on: "AutoPay on",
-    paid: "Paid",
-  };
-  return labels[status] || status.replaceAll("_", " ");
-}
-
-function simulatedVendorBill(vendor) {
-  const source = `${vendor.accountNumber || vendor.name}`.split("").reduce((sum, char) => {
-    return sum + char.charCodeAt(0);
-  }, 0);
-  const amountCents = 5000 + (source % 95000);
-
-  return {
-    amountCents,
-    dueDate: addDaysIso(7 + (source % 14)),
-    invoice: `AUTO-${source}-${Date.now().toString().slice(-4)}`,
-  };
-}
-
-function createSeedData() {
-  return {
-    nextAccountId: 4,
-    nextVendorId: 5,
-    nextBillId: 5,
-    nextReceiptId: 5,
-    accounts: [
-      {
-        id: 1,
-        name: "Operating Checking",
-        institution: "Demo Bank",
-        accountType: "checking",
-        balanceCents: 8426000,
-        lastSyncedAt: new Date().toISOString(),
-      },
-      {
-        id: 2,
-        name: "Tax Savings",
-        institution: "Demo Bank",
-        accountType: "savings",
-        balanceCents: 1840000,
-        lastSyncedAt: new Date().toISOString(),
-      },
-      {
-        id: 3,
-        name: "Business Rewards Card",
-        institution: "Demo Card",
-        accountType: "credit_card",
-        balanceCents: -321000,
-        lastSyncedAt: new Date().toISOString(),
-      },
-    ],
-    vendors: [
-      {
-        id: 1,
-        name: "City Electric",
-        category: "Electric Utility",
-        accountNumber: "CE-884921",
-        website: "https://example.com/city-electric",
-        autopay: false,
-        paymentMethod: "Operating Checking",
-        schedule: "Pay 2 days early",
-        maxPaymentCents: 250000,
-      },
-      {
-        id: 2,
-        name: "Metro Water",
-        category: "Water",
-        accountNumber: "MW-102938",
-        website: "https://example.com/metro-water",
-        autopay: true,
-        paymentMethod: "Operating Checking",
-        schedule: "Pay on due date",
-        maxPaymentCents: 120000,
-      },
-      {
-        id: 3,
-        name: "Frontier Internet",
-        category: "Internet",
-        accountNumber: "FI-72891",
-        website: "https://example.com/frontier-internet",
-        autopay: true,
-        paymentMethod: "Business Credit Card",
-        schedule: "Pay 3 days early",
-        maxPaymentCents: 60000,
-      },
-      {
-        id: 4,
-        name: "Restaurant Supply Co.",
-        category: "Food Supplier",
-        accountNumber: "RSC-558201",
-        website: "https://example.com/restaurant-supply",
-        autopay: false,
-        paymentMethod: "Operating Checking",
-        schedule: "Manual approval",
-        maxPaymentCents: 800000,
-      },
-    ],
-    bills: [
-      {
-        id: 1,
-        vendorId: 1,
-        amountCents: 192000,
-        dueDate: todayIso(),
-        invoice: "INV-4481",
-        status: "approval_needed",
-        source: "pdf_upload",
-      },
-      {
-        id: 2,
-        vendorId: 2,
-        amountCents: 92000,
-        dueDate: todayIso(),
-        invoice: "MW-2026-0708",
-        status: "ready_to_pay",
-        source: "vendor_portal",
-      },
-      {
-        id: 3,
-        vendorId: 4,
-        amountCents: 674000,
-        dueDate: addDaysIso(2),
-        invoice: "RSC-88214",
-        status: "scheduled",
-        source: "business_email",
-      },
-      {
-        id: 4,
-        vendorId: 3,
-        amountCents: 41200,
-        dueDate: addDaysIso(6),
-        invoice: "FI-72891",
-        status: "autopay_on",
-        source: "vendor_portal",
-      },
-    ],
-    receipts: [
-      { id: 1, bill_id: 1, vendor_name: "City Electric", document_type: "Invoice PDF" },
-      { id: 2, bill_id: null, vendor_name: "Landlord LLC", document_type: "Payment Confirmation" },
-      { id: 3, bill_id: 3, vendor_name: "Restaurant Supply Co.", document_type: "Invoice" },
-      { id: 4, bill_id: 2, vendor_name: "Metro Water", document_type: "Statement PDF" },
-    ],
-  };
-}
-
-function getLocalData() {
-  const saved = window.localStorage.getItem(LOCAL_STORAGE_KEY);
-  if (saved) {
-    return JSON.parse(saved);
-  }
-  const seeded = createSeedData();
-  saveLocalData(seeded);
-  return seeded;
-}
-
-function saveLocalData(data) {
-  window.localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(data));
-}
-
-function localBillRows(data) {
-  return data.bills
-    .map((bill) => {
-      const vendor = data.vendors.find((item) => item.id === bill.vendorId);
-      return {
-        id: bill.id,
-        vendor: vendor?.name || "Unknown Vendor",
-        category: vendor?.category || "Uncategorized",
-        amount: formatMoney(bill.amountCents),
-        amountCents: bill.amountCents,
-        dueDate: bill.dueDate,
-        due: dueLabel(bill.dueDate),
-        invoice: bill.invoice,
-        status: bill.status,
-        statusLabel: statusLabel(bill.status),
-        source: bill.source,
-        warning: bill.status === "approval_needed",
-      };
-    })
-    .sort((a, b) => a.dueDate.localeCompare(b.dueDate) || b.amountCents - a.amountCents);
-}
-
-function localDashboard(data) {
-  const bills = data.bills;
-  const cashCents = data.accounts
-    .filter((account) => ["checking", "savings"].includes(account.accountType))
-    .reduce((sum, account) => sum + account.balanceCents, 0);
-  const weekEnd = addDaysIso(7);
-  const dueTodayCents = bills
-    .filter((bill) => bill.dueDate === todayIso() && bill.status !== "paid")
-    .reduce((sum, bill) => sum + bill.amountCents, 0);
-  const dueWeekCents = bills
-    .filter((bill) => bill.dueDate >= todayIso() && bill.dueDate <= weekEnd && bill.status !== "paid")
-    .reduce((sum, bill) => sum + bill.amountCents, 0);
-  const paidCents = bills
-    .filter((bill) => bill.status === "paid")
-    .reduce((sum, bill) => sum + bill.amountCents, 0);
-  const monthlyCents = bills.reduce((sum, bill) => sum + bill.amountCents, 0);
-
-  return {
-    cashBalance: formatMoney(cashCents),
-    dueToday: formatMoney(dueTodayCents),
-    dueThisWeek: formatMoney(dueWeekCents),
-    paidBills: formatMoney(paidCents),
-    monthlySpending: formatMoney(monthlyCents),
-    projectedCashAfterWeek: formatMoney(cashCents - dueWeekCents),
-    recommendation:
-      "Review approval-needed bills first. Approved bills can be marked paid in demo mode.",
-  };
-}
-
-async function localApi(path, options = {}) {
-  const method = options.method || "GET";
-  const data = getLocalData();
-  const payload = options.body ? JSON.parse(options.body) : {};
-
-  if (method === "GET" && path === "/api/dashboard") return localDashboard(data);
-  if (method === "GET" && path === "/api/bills") return localBillRows(data);
-  if (method === "GET" && path === "/api/vendors") {
-    return data.vendors
-      .map((vendor) => ({ ...vendor, limit: formatMoney(vendor.maxPaymentCents) }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }
-  if (method === "GET" && path === "/api/receipts") return data.receipts;
-
-  if (method === "POST" && path === "/api/vendors") {
-    const vendor = {
-      id: data.nextVendorId++,
-      name: payload.companyName,
-      category: payload.category,
-      accountNumber: payload.accountNumber || "Manual",
-      website: payload.website || "https://example.com",
-      autopay: false,
-      paymentMethod: payload.paymentMethod || "Operating Checking",
-      schedule: payload.paymentSchedule || "Manual approval",
-      maxPaymentCents: centsFromAmount(payload.maxPayment || 0),
-    };
-    data.vendors.push(vendor);
-    saveLocalData(data);
-    return { ok: true, vendorId: vendor.id };
-  }
-
-  if (method === "POST" && path === "/api/bills") {
-    const bill = {
-      id: data.nextBillId++,
-      vendorId: Number(payload.vendorId),
-      amountCents: centsFromAmount(payload.amount),
-      dueDate: payload.dueDate,
-      invoice: payload.invoiceNumber,
-      status: payload.status || "approval_needed",
-      source: "manual_entry",
-    };
-    data.bills.push(bill);
-    saveLocalData(data);
-    return { ok: true, billId: bill.id };
-  }
-
-  if (method === "POST" && path === "/api/accounts") {
-    const account = {
-      id: data.nextAccountId++,
-      name: payload.name,
-      institution: payload.institution,
-      accountType: payload.accountType,
-      balanceCents: centsFromAmount(payload.balance),
-      lastSyncedAt: new Date().toISOString(),
-    };
-    data.accounts.push(account);
-    saveLocalData(data);
-    return { ok: true, accountId: account.id };
-  }
-
-  if (method === "POST" && path === "/api/pay-approved") {
-    const payable = data.bills.filter((bill) =>
-      ["ready_to_pay", "scheduled", "autopay_on"].includes(bill.status),
-    );
-    const totalPaid = payable.reduce((sum, bill) => sum + bill.amountCents, 0);
-    payable.forEach((bill) => {
-      bill.status = "paid";
-      const vendor = data.vendors.find((item) => item.id === bill.vendorId);
-      data.receipts.unshift({
-        id: data.nextReceiptId++,
-        bill_id: bill.id,
-        vendor_name: vendor?.name || "Unknown Vendor",
-        document_type: "Payment Confirmation",
-      });
-    });
-    const account = data.accounts.find((item) => ["checking", "savings"].includes(item.accountType));
-    if (account) account.balanceCents -= totalPaid;
-    saveLocalData(data);
-    return { ok: true, paidCount: payable.length, totalPaid: formatMoney(totalPaid) };
-  }
-
-  if (method === "POST" && path === "/api/bill-detections") {
-    const vendorName = payload.vendorName || titleCase(cleanFileName(payload.filename || "Uploaded Invoice"));
-    let vendor = data.vendors.find((item) => item.name.toLowerCase() === vendorName.toLowerCase());
-    if (!vendor) {
-      vendor = {
-        id: data.nextVendorId++,
-        name: vendorName,
-        category: "Uploaded Invoice",
-        accountNumber: "Detected",
-        website: "https://example.com",
-        autopay: false,
-        paymentMethod: "Operating Checking",
-        schedule: "Manual approval",
-        maxPaymentCents: 500000,
-      };
-      data.vendors.push(vendor);
-    }
-    const bill = {
-      id: data.nextBillId++,
-      vendorId: vendor.id,
-      amountCents: centsFromAmount(payload.amount || 250),
-      dueDate: payload.dueDate || addDaysIso(7),
-      invoice: payload.invoiceNumber || `UPLOAD-${Date.now()}`,
-      status: "approval_needed",
-      source: "pdf_upload",
-    };
-    data.bills.push(bill);
-    data.receipts.unshift({
-      id: data.nextReceiptId++,
-      bill_id: bill.id,
-      vendor_name: vendor.name,
-      document_type: "Uploaded Invoice",
-    });
-    saveLocalData(data);
-    return { ok: true, billId: bill.id, vendor: vendor.name, amount: formatMoney(bill.amountCents) };
-  }
-
-  const autopayMatch = path.match(/^\/api\/vendors\/(\d+)\/autopay$/);
-  if (method === "POST" && autopayMatch) {
-    const vendor = data.vendors.find((item) => item.id === Number(autopayMatch[1]));
-    if (!vendor) throw new Error("Vendor not found.");
-    vendor.autopay = Boolean(payload.enabled);
-    saveLocalData(data);
-    return { ok: true, vendorId: vendor.id, autopay: vendor.autopay };
-  }
-
-  const fetchVendorBillMatch = path.match(/^\/api\/vendors\/(\d+)\/fetch-bill$/);
-  if (method === "POST" && fetchVendorBillMatch) {
-    const vendor = data.vendors.find((item) => item.id === Number(fetchVendorBillMatch[1]));
-    if (!vendor) throw new Error("Vendor not found.");
-    if (!vendor.accountNumber || vendor.accountNumber === "Manual") {
-      throw new Error("Add this vendor's account number before fetching bills.");
-    }
-
-    const detected = simulatedVendorBill(vendor);
-    const bill = {
-      id: data.nextBillId++,
-      vendorId: vendor.id,
-      amountCents: detected.amountCents,
-      dueDate: detected.dueDate,
-      invoice: detected.invoice,
-      status: "approval_needed",
-      source: "vendor_portal",
-    };
-    data.bills.push(bill);
-    data.receipts.unshift({
-      id: data.nextReceiptId++,
-      bill_id: bill.id,
-      vendor_name: vendor.name,
-      document_type: "Vendor Portal Bill",
-    });
-    saveLocalData(data);
-    return {
-      ok: true,
-      billId: bill.id,
-      vendor: vendor.name,
-      amount: formatMoney(bill.amountCents),
-      dueDate: bill.dueDate,
-    };
-  }
-
-  const payMatch = path.match(/^\/api\/bills\/(\d+)\/pay$/);
-  if (method === "POST" && payMatch) {
-    const bill = data.bills.find((item) => item.id === Number(payMatch[1]));
-    if (!bill) throw new Error("Bill not found.");
-    if (bill.status !== "paid") {
-      const account = data.accounts.find((item) => ["checking", "savings"].includes(item.accountType));
-      if (account) account.balanceCents -= bill.amountCents;
-      const vendor = data.vendors.find((item) => item.id === bill.vendorId);
-      data.receipts.unshift({
-        id: data.nextReceiptId++,
-        bill_id: bill.id,
-        vendor_name: vendor?.name || "Unknown Vendor",
-        document_type: "Payment Confirmation",
-      });
-    }
-    bill.status = "paid";
-    saveLocalData(data);
-    return { ok: true, billId: bill.id, status: "paid" };
-  }
-
-  if (method === "POST" && path === "/api/assistant") {
-    const question = String(payload.question || "").toLowerCase();
-    const bills = localBillRows(data);
-    if (question.includes("unpaid") || question.includes("invoice")) {
-      const unpaid = bills.filter((bill) => bill.status !== "paid");
-      const total = unpaid.reduce((sum, bill) => sum + bill.amountCents, 0);
-      return { answer: `There are ${unpaid.length} unpaid invoice(s), totaling ${formatMoney(total)}.` };
-    }
-    if (question.includes("cash")) {
-      const dashboard = localDashboard(data);
-      return {
-        answer: `Current cash is ${dashboard.cashBalance}. After this week's unpaid bills, projected cash is ${dashboard.projectedCashAfterWeek}.`,
-      };
-    }
-    if (question.includes("utility")) {
-      const utilityTotal = bills
-        .filter((bill) => /utility|water|internet|gas|phone/i.test(bill.category))
-        .reduce((sum, bill) => sum + bill.amountCents, 0);
-      return { answer: `Utility spend currently tracked is ${formatMoney(utilityTotal)}.` };
-    }
-    return {
-      answer:
-        "I can answer questions about unpaid invoices, utility spend, due dates, projected cash, vendor limits, and receipt records.",
-    };
-  }
-
-  throw new Error("This action is not available.");
-}
-
 function showToast(message) {
   toast.textContent = message;
-  toast.classList.add("show");
-  window.setTimeout(() => toast.classList.remove("show"), 3200);
+  toast.classList.remove("hidden");
+  window.setTimeout(() => toast.classList.add("hidden"), 2200);
 }
 
-function showPage(pageId, updateHash = true) {
-  const page = document.querySelector(`#${pageId}`);
-  if (!page) {
-    return;
-  }
-
-  appPages.forEach((item) => item.classList.toggle("active-page", item.id === pageId));
-  navLinks.forEach((link) => link.classList.toggle("active", link.dataset.page === pageId));
-
-  topbarEyebrow.textContent = page.dataset.title || "BillPilot AI";
-  topbarHeading.textContent = page.dataset.heading || "Manage bills, cash, vendors, and payments.";
-
-  if (updateHash) {
-    const activeLink = [...navLinks].find((link) => link.dataset.page === pageId);
-    if (activeLink) {
-      window.history.replaceState(null, "", activeLink.getAttribute("href"));
-    }
-  }
-
-  window.scrollTo({ top: 0, behavior: "smooth" });
+function escapeHtml(value) {
+  return String(value ?? "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
 }
 
-function renderDashboard(dashboard) {
-  const values = [
-    ["Cash balance", dashboard.cashBalance, `Projected ${dashboard.projectedCashAfterWeek} after scheduled bills this week.`],
-    ["Due today", dashboard.dueToday, "Bills waiting for approval or payment."],
-    ["Due this week", dashboard.dueThisWeek, "Open bills across utilities, rent, and suppliers."],
-    ["Monthly spending", dashboard.monthlySpending, `${dashboard.paidBills} has already been paid.`],
-  ];
-
-  metricCards.forEach((card, index) => {
-    const [label, value, detail] = values[index];
-    card.querySelector("span").textContent = label;
-    card.querySelector("strong").textContent = value;
-    card.querySelector("p").textContent = detail;
-  });
-
-  aiNote.textContent = dashboard.recommendation;
+function slugify(value) {
+  return String(value || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
 }
 
-function renderBills(bills) {
-  billList.innerHTML = bills
-    .map(
-      (bill) => `
-        <div class="bill-row">
-          <div>
-            <h3>${bill.vendor}</h3>
-            <p>${bill.category} • Due ${bill.due} • ${bill.invoice}</p>
-          </div>
-          <span class="amount">${bill.amount}</span>
-          <button
-            class="status ${bill.warning ? "warning" : ""}"
-            data-pay-bill="${bill.id}"
-            ${bill.status === "paid" ? "disabled" : ""}
-          >${bill.statusLabel}</button>
-        </div>
-      `,
-    )
-    .join("");
+function categoryName(id) {
+  return state.categories.find((category) => category.id === id)?.name || "Uncategorized";
 }
 
-function renderVendors(vendors) {
-  vendorsCache = vendors;
-  vendorGrid.innerHTML = vendors
-    .map(
-      (vendor) => `
-        <div class="vendor-card">
-          <div>
-            <h3>${vendor.name}</h3>
-            <p>${vendor.category} • Account ${vendor.accountNumber || "Not set"} • ${vendor.limit} max</p>
-            <p>${vendor.schedule} • ${vendor.website || "No vendor site"}</p>
-          </div>
-          <div class="vendor-actions">
-            <button
-              class="secondary compact"
-              data-fetch-vendor="${vendor.id}"
-              aria-label="Fetch latest bill for ${vendor.name}"
-            >Fetch Bill</button>
-            <button
-              class="toggle ${vendor.autopay ? "on" : ""}"
-              data-vendor-id="${vendor.id}"
-              aria-label="Toggle AutoPay for ${vendor.name}"
-            ></button>
-          </div>
-        </div>
-      `,
-    )
-    .join("");
-
-  billVendorSelect.innerHTML = vendors
-    .map((vendor) => `<option value="${vendor.id}">${vendor.name}</option>`)
-    .join("");
+function getActiveTv() {
+  return state.tvs.find((tv) => tv.id === state.activeTvId) || state.tvs[0];
 }
 
-function renderReceipts(receipts) {
-  receiptList.innerHTML = receipts
-    .map(
-      (receipt) => `
-        <li>
-          <span>${receipt.vendor_name}</span>
-          <strong>${receipt.document_type}</strong>
-        </li>
-      `,
-    )
-    .join("");
-}
-
-function addMessage(text, type) {
-  const message = document.createElement("div");
-  message.className = `message ${type}`;
-  message.textContent = text;
-  chatWindow.appendChild(message);
-  chatWindow.scrollTop = chatWindow.scrollHeight;
-}
-
-async function loadApp() {
-  const [dashboard, bills, vendors, receipts] = await Promise.all([
-    api("/api/dashboard"),
-    api("/api/bills"),
-    api("/api/vendors"),
-    api("/api/receipts"),
+async function loadAdminData() {
+  const [categories, items, tvs] = await Promise.all([
+    api("/api/categories"),
+    api("/api/menu-items"),
+    api("/api/tv-screens"),
   ]);
 
-  renderDashboard(dashboard);
-  renderBills(bills);
-  renderVendors(vendors);
-  renderReceipts(receipts);
+  state.categories = categories;
+  state.items = items;
+  state.tvs = tvs;
+
+  if (!state.activeTvId || !state.tvs.some((tv) => tv.id === state.activeTvId)) {
+    state.activeTvId = state.tvs[0]?.id || null;
+  }
+
+  renderAdmin();
 }
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const question = input.value.trim();
+function renderAdmin() {
+  renderTvSelect();
+  renderDashboard();
+  renderMenuItems();
+  renderCategoryChoices();
+  renderCategories();
+  renderTvScreens();
+  renderTvFormChoices();
+  loadDesignForm();
+  renderPreviews();
+}
 
-  if (!question) {
+function renderTvSelect() {
+  activeTvSelect.innerHTML = state.tvs
+    .map((tv) => `<option value="${tv.id}" ${tv.id === state.activeTvId ? "selected" : ""}>${escapeHtml(tv.name)}</option>`)
+    .join("");
+
+  const tv = getActiveTv();
+  if (!tv) {
+    activeTvLink.textContent = "No TV yet";
+    openDisplayLink.removeAttribute("href");
     return;
   }
 
-  addMessage(question, "user");
-  input.value = "";
+  const url = `/display/${tv.slug}`;
+  activeTvLink.textContent = tv.name;
+  openDisplayLink.href = url;
+}
+
+function renderDashboard() {
+  document.querySelector("#itemCount").textContent = state.items.length;
+  document.querySelector("#categoryCount").textContent = state.categories.length;
+  document.querySelector("#tvCount").textContent = state.tvs.length;
+  document.querySelector("#soldOutCount").textContent = state.items.filter((item) => !item.available).length;
+
+  document.querySelector("#dashboardItemList").innerHTML = state.items
+    .slice(0, 8)
+    .map(
+      (item) => `
+        <div>
+          <strong>${escapeHtml(item.name)} <span class="price">${money.format(item.price)}</span></strong>
+          <span>${escapeHtml(categoryName(item.category_id))} - ${item.available ? "In stock" : "Out of stock"}</span>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderCategoryChoices() {
+  const select = menuItemForm.elements.category_id;
+  select.innerHTML = state.categories
+    .map((category) => `<option value="${category.id}">${escapeHtml(category.name)}</option>`)
+    .join("");
+}
+
+function renderMenuItems() {
+  document.querySelector("#menuItemList").innerHTML = state.items
+    .map(
+      (item) => `
+        <article class="menu-row">
+          ${
+            item.image_url
+              ? `<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}">`
+              : `<div class="placeholder-img">Menu</div>`
+          }
+          <div>
+            <div class="item-title">
+              <strong>${escapeHtml(item.name)}</strong>
+              <span class="price">${money.format(item.price)}</span>
+              <span class="pill ${item.available ? "ok" : "sold"}">${item.available ? "In stock" : "Sold out"}</span>
+            </div>
+            <p class="item-meta">${escapeHtml(categoryName(item.category_id))} - Sort ${item.sort_order}</p>
+            <p>${escapeHtml(item.description || "")}</p>
+          </div>
+          <div class="row-actions">
+            <button class="secondary" data-action="edit-item" data-id="${item.id}">Edit</button>
+            <button class="secondary" data-action="toggle-stock" data-id="${item.id}">${item.available ? "Mark out" : "Restock"}</button>
+            <button data-action="delete-item" data-id="${item.id}">Delete</button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+function renderCategories() {
+  document.querySelector("#categoryList").innerHTML = state.categories
+    .map(
+      (category) => `
+        <div>
+          <strong>${escapeHtml(category.name)}</strong>
+          <span>Sort order ${category.sort_order}</span>
+          <div class="row-actions">
+            <button class="secondary" data-action="edit-category" data-id="${category.id}">Edit</button>
+            <button data-action="delete-category" data-id="${category.id}">Delete</button>
+          </div>
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function renderTvFormChoices(tv = null) {
+  const assignedCategories = new Set(tv?.category_ids || []);
+  const pinnedItems = new Set(tv?.item_ids || []);
+
+  document.querySelector("#tvCategoryChoices").innerHTML = state.categories
+    .map(
+      (category) => `
+        <label>
+          <input type="checkbox" name="category_ids" value="${category.id}" ${assignedCategories.has(category.id) ? "checked" : ""}>
+          ${escapeHtml(category.name)}
+        </label>
+      `,
+    )
+    .join("");
+
+  document.querySelector("#tvItemChoices").innerHTML = state.items
+    .map(
+      (item) => `
+        <label>
+          <input type="checkbox" name="item_ids" value="${item.id}" ${pinnedItems.has(item.id) ? "checked" : ""}>
+          ${escapeHtml(item.name)}
+        </label>
+      `,
+    )
+    .join("");
+}
+
+function renderTvScreens() {
+  document.querySelector("#tvScreenList").innerHTML = state.tvs
+    .map(
+      (tv) => `
+        <article class="tv-card">
+          <div class="tv-card-head">
+            <div>
+              <strong>${escapeHtml(tv.name)}</strong>
+              <div class="tv-url">${window.location.origin}/display/${escapeHtml(tv.slug)}</div>
+            </div>
+            <span class="pill ${tv.show_images ? "ok" : "sold"}">${tv.show_images ? "Images on" : "Images off"}</span>
+          </div>
+          <p class="muted">${tv.category_ids.length || "All"} categories assigned, ${tv.item_ids.length} pinned items.</p>
+          <div class="row-actions">
+            <button class="secondary" data-action="select-tv" data-id="${tv.id}">Select</button>
+            <button class="secondary" data-action="edit-tv" data-id="${tv.id}">Edit</button>
+            <a class="button secondary" href="/display/${tv.slug}" target="_blank" rel="noreferrer">Open</a>
+            <button data-action="delete-tv" data-id="${tv.id}">Delete</button>
+          </div>
+        </article>
+      `,
+    )
+    .join("");
+}
+
+async function loadDesignForm() {
+  const tv = getActiveTv();
+  if (!tv) return;
+
+  const settings = await api(`/api/tv-screens/${tv.id}/settings`);
+  for (const [key, value] of Object.entries(settings)) {
+    if (designForm.elements[key]) {
+      designForm.elements[key].value = value ?? "";
+    }
+  }
+}
+
+async function getDisplayDataForActiveTv() {
+  const tv = getActiveTv();
+  if (!tv) return null;
+  return api(`/api/display/${tv.slug}`);
+}
+
+async function renderPreviews() {
+  const displayData = await getDisplayDataForActiveTv();
+  if (!displayData) return;
+
+  document.querySelector("#designPreview").innerHTML = renderTvMenu(displayData, true);
+  document.querySelector("#mainPreview").innerHTML = renderTvMenu(displayData, true);
+}
+
+function groupDisplayItems(displayData) {
+  const groups = displayData.categories.map((category) => ({ ...category, items: [] }));
+  const groupById = new Map(groups.map((group) => [group.id, group]));
+  const fallback = { id: "uncategorized", name: "Other", items: [] };
+
+  for (const item of displayData.items) {
+    const group = groupById.get(item.category_id) || fallback;
+    group.items.push(item);
+  }
+
+  return fallback.items.length ? [...groups, fallback] : groups;
+}
+
+function renderTvMenu(displayData, compact = false) {
+  const { tv, settings } = displayData;
+  const groups = groupDisplayItems(displayData).filter((group) => group.items.length);
+  const titleSize = Math.max(28, compact ? settings.title_size * 0.62 : settings.title_size);
+  const itemSize = Math.max(16, compact ? settings.item_size * 0.72 : settings.item_size);
+  const priceSize = Math.max(16, compact ? settings.price_size * 0.72 : settings.price_size);
+  const bgImage = settings.background_image_url ? `background-image: url('${escapeHtml(settings.background_image_url)}');` : "";
+
+  return `
+    <div class="tv-menu" style="background-color:${escapeHtml(settings.background_color)}; color:${escapeHtml(settings.text_color)}; ${bgImage}">
+      <header class="tv-header" style="color:${escapeHtml(settings.accent_color)}">
+        <div>
+          <h1 style="font-size:${titleSize}px">${escapeHtml(settings.restaurant_name)}</h1>
+          <p>${escapeHtml(tv.name)}</p>
+        </div>
+        ${settings.logo_url ? `<img class="tv-logo" src="${escapeHtml(settings.logo_url)}" alt="${escapeHtml(settings.restaurant_name)} logo">` : ""}
+      </header>
+      <div class="tv-grid-menu">
+        ${
+          groups.length
+            ? groups
+                .map(
+                  (group) => `
+                    <section class="tv-category">
+                      <h2 style="color:${escapeHtml(settings.accent_color)}; font-size:${itemSize * 1.12}px">${escapeHtml(group.name)}</h2>
+                      ${group.items
+                        .map((item) => renderTvItem(item, tv, settings, itemSize, priceSize))
+                        .join("")}
+                    </section>
+                  `,
+                )
+                .join("")
+            : `<section class="tv-category"><h2>No menu items assigned yet</h2></section>`
+        }
+      </div>
+    </div>
+  `;
+}
+
+function renderTvItem(item, tv, settings, itemSize, priceSize) {
+  const showImage = tv.show_images && item.image_url;
+  return `
+    <article class="tv-item ${showImage ? "" : "no-image"} ${item.available ? "" : "sold-out"}">
+      ${showImage ? `<img src="${escapeHtml(item.image_url)}" alt="${escapeHtml(item.name)}">` : ""}
+      <div>
+        <h3 style="font-size:${itemSize}px">${escapeHtml(item.name)} ${item.available ? "" : `<span class="sold-badge">Sold out</span>`}</h3>
+        ${item.description ? `<p style="font-size:${Math.max(14, itemSize * 0.58)}px">${escapeHtml(item.description)}</p>` : ""}
+      </div>
+      <strong style="color:${escapeHtml(settings.price_color)}; font-size:${priceSize}px">${money.format(item.price)}</strong>
+    </article>
+  `;
+}
+
+function serializeMenuItemForm() {
+  return {
+    name: menuItemForm.elements.name.value.trim(),
+    description: menuItemForm.elements.description.value.trim(),
+    category_id: menuItemForm.elements.category_id.value,
+    price: Number(menuItemForm.elements.price.value),
+    image_url: menuItemForm.elements.image_url.value.trim(),
+    sort_order: Number(menuItemForm.elements.sort_order.value || 0),
+    available: menuItemForm.elements.available.checked,
+  };
+}
+
+function serializeCategoryForm() {
+  return {
+    name: categoryForm.elements.name.value.trim(),
+    sort_order: Number(categoryForm.elements.sort_order.value || 0),
+  };
+}
+
+function serializeTvForm() {
+  const categoryIds = [...tvForm.querySelectorAll("[name='category_ids']:checked")].map((input) => input.value);
+  const itemIds = [...tvForm.querySelectorAll("[name='item_ids']:checked")].map((input) => input.value);
+  return {
+    name: tvForm.elements.name.value.trim(),
+    slug: slugify(tvForm.elements.slug.value || tvForm.elements.name.value),
+    show_images: tvForm.elements.show_images.checked,
+    show_sold_out: tvForm.elements.show_sold_out.checked,
+    category_ids: categoryIds,
+    item_ids: itemIds,
+  };
+}
+
+function serializeDesignForm() {
+  return {
+    restaurant_name: designForm.elements.restaurant_name.value.trim(),
+    background_color: designForm.elements.background_color.value,
+    text_color: designForm.elements.text_color.value,
+    accent_color: designForm.elements.accent_color.value,
+    price_color: designForm.elements.price_color.value,
+    title_size: Number(designForm.elements.title_size.value),
+    item_size: Number(designForm.elements.item_size.value),
+    price_size: Number(designForm.elements.price_size.value),
+    logo_url: designForm.elements.logo_url.value.trim(),
+    background_image_url: designForm.elements.background_image_url.value.trim(),
+  };
+}
+
+function resetMenuForm() {
+  menuItemForm.reset();
+  menuItemForm.elements.id.value = "";
+  menuItemForm.elements.available.checked = true;
+  menuItemForm.elements.sort_order.value = "0";
+  document.querySelector("#menuFormTitle").textContent = "New Item";
+}
+
+function resetCategoryForm() {
+  categoryForm.reset();
+  categoryForm.elements.id.value = "";
+  categoryForm.elements.sort_order.value = "0";
+  document.querySelector("#categoryFormTitle").textContent = "New Category";
+}
+
+function resetTvForm() {
+  tvForm.reset();
+  tvForm.elements.id.value = "";
+  tvForm.elements.show_images.checked = true;
+  tvForm.elements.show_sold_out.checked = true;
+  renderTvFormChoices();
+  document.querySelector("#tvFormTitle").textContent = "New TV";
+}
+
+document.body.addEventListener("click", async (event) => {
+  const trigger = event.target.closest("[data-action]");
+  if (!trigger) return;
+
+  const { action, id } = trigger.dataset;
 
   try {
-    const response = await api("/api/assistant", {
-      method: "POST",
-      body: JSON.stringify({ question }),
-    });
-    addMessage(response.answer, "bot");
+    if (action === "edit-item") {
+      const item = state.items.find((entry) => entry.id === id);
+      menuItemForm.elements.id.value = item.id;
+      menuItemForm.elements.name.value = item.name;
+      menuItemForm.elements.description.value = item.description || "";
+      menuItemForm.elements.category_id.value = item.category_id;
+      menuItemForm.elements.price.value = item.price;
+      menuItemForm.elements.image_url.value = item.image_url || "";
+      menuItemForm.elements.sort_order.value = item.sort_order;
+      menuItemForm.elements.available.checked = item.available;
+      document.querySelector("#menuFormTitle").textContent = "Edit Item";
+    }
+
+    if (action === "toggle-stock") {
+      const item = state.items.find((entry) => entry.id === id);
+      await api(`/api/menu-items/${id}/stock`, {
+        method: "PATCH",
+        body: JSON.stringify({ available: !item.available }),
+      });
+      showToast("Stock updated");
+      await loadAdminData();
+    }
+
+    if (action === "delete-item" && window.confirm("Delete this menu item?")) {
+      await api(`/api/menu-items/${id}`, { method: "DELETE" });
+      showToast("Menu item deleted");
+      await loadAdminData();
+    }
+
+    if (action === "edit-category") {
+      const category = state.categories.find((entry) => entry.id === id);
+      categoryForm.elements.id.value = category.id;
+      categoryForm.elements.name.value = category.name;
+      categoryForm.elements.sort_order.value = category.sort_order;
+      document.querySelector("#categoryFormTitle").textContent = "Edit Category";
+    }
+
+    if (action === "delete-category" && window.confirm("Delete this category? Menu items in it will become uncategorized.")) {
+      await api(`/api/categories/${id}`, { method: "DELETE" });
+      showToast("Category deleted");
+      await loadAdminData();
+    }
+
+    if (action === "select-tv") {
+      state.activeTvId = id;
+      renderAdmin();
+    }
+
+    if (action === "edit-tv") {
+      const tv = state.tvs.find((entry) => entry.id === id);
+      state.activeTvId = id;
+      tvForm.elements.id.value = tv.id;
+      tvForm.elements.name.value = tv.name;
+      tvForm.elements.slug.value = tv.slug;
+      tvForm.elements.show_images.checked = tv.show_images;
+      tvForm.elements.show_sold_out.checked = tv.show_sold_out;
+      renderTvFormChoices(tv);
+      document.querySelector("#tvFormTitle").textContent = "Edit TV";
+      renderAdmin();
+    }
+
+    if (action === "delete-tv" && window.confirm("Delete this TV profile?")) {
+      await api(`/api/tv-screens/${id}`, { method: "DELETE" });
+      showToast("TV deleted");
+      await loadAdminData();
+    }
   } catch (error) {
-    addMessage("I could not reach the BillPilot backend. Start server.py and try again.", "bot");
+    showToast(error.message);
   }
 });
 
-navLinks.forEach((link) => {
+menuItemForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = menuItemForm.elements.id.value;
+  await api(id ? `/api/menu-items/${id}` : "/api/menu-items", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(serializeMenuItemForm()),
+  });
+  resetMenuForm();
+  showToast("Menu item saved");
+  await loadAdminData();
+});
+
+categoryForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = categoryForm.elements.id.value;
+  await api(id ? `/api/categories/${id}` : "/api/categories", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(serializeCategoryForm()),
+  });
+  resetCategoryForm();
+  showToast("Category saved");
+  await loadAdminData();
+});
+
+tvForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const id = tvForm.elements.id.value;
+  const saved = await api(id ? `/api/tv-screens/${id}` : "/api/tv-screens", {
+    method: id ? "PUT" : "POST",
+    body: JSON.stringify(serializeTvForm()),
+  });
+  state.activeTvId = saved.id;
+  resetTvForm();
+  showToast("TV profile saved");
+  await loadAdminData();
+});
+
+designForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const tv = getActiveTv();
+  if (!tv) return;
+
+  await api(`/api/tv-screens/${tv.id}/settings`, {
+    method: "PUT",
+    body: JSON.stringify(serializeDesignForm()),
+  });
+  showToast("Design saved");
+  await renderPreviews();
+});
+
+document.querySelector("#resetMenuForm").addEventListener("click", resetMenuForm);
+document.querySelector("#resetCategoryForm").addEventListener("click", resetCategoryForm);
+document.querySelector("#resetTvForm").addEventListener("click", resetTvForm);
+
+activeTvSelect.addEventListener("change", async () => {
+  state.activeTvId = activeTvSelect.value;
+  renderTvSelect();
+  await loadDesignForm();
+  await renderPreviews();
+});
+
+document.querySelectorAll(".nav-list a[data-page]").forEach((link) => {
   link.addEventListener("click", (event) => {
     event.preventDefault();
-    showPage(link.dataset.page);
+    const page = link.dataset.page;
+    document.querySelectorAll(".nav-list a").forEach((entry) => entry.classList.toggle("active", entry === link));
+    document.querySelectorAll(".app-page").forEach((entry) => entry.classList.toggle("active-page", entry.id === `${page}-page`));
+    const pageElement = document.querySelector(`#${page}-page`);
+    pageEyebrow.textContent = pageElement.dataset.title;
+    pageHeading.textContent = pageElement.dataset.heading;
+    window.location.hash = page;
   });
 });
 
-vendorGrid.addEventListener("click", async (event) => {
-  const fetchVendorId = event.target.dataset.fetchVendor;
-  if (fetchVendorId) {
-    event.target.disabled = true;
+menuItemForm.elements.name.addEventListener("input", () => {
+  if (!menuItemForm.elements.sort_order.value) {
+    menuItemForm.elements.sort_order.value = String(state.items.length + 1);
+  }
+});
+
+tvForm.elements.name.addEventListener("input", () => {
+  if (!tvForm.elements.id.value) {
+    tvForm.elements.slug.value = slugify(tvForm.elements.name.value);
+  }
+});
+
+async function loadDisplayRoute(slug) {
+  adminApp.classList.add("hidden");
+  displayApp.classList.remove("hidden");
+  document.body.classList.add("display-mode");
+
+  async function refresh() {
     try {
-      const response = await api(`/api/vendors/${fetchVendorId}/fetch-bill`, { method: "POST" });
-      await loadApp();
-      showToast(`Fetched ${response.vendor} bill for ${response.amount}.`);
-      showPage("bills-page");
+      state.activeDisplay = await api(`/api/display/${slug}`);
+      document.title = `${state.activeDisplay.tv.name} - TV Menu`;
+      displayApp.innerHTML = renderTvMenu(state.activeDisplay);
     } catch (error) {
-      showToast(error.message);
-    } finally {
-      event.target.disabled = false;
+      displayApp.innerHTML = `<div class="tv-menu"><h1>Display not found</h1><p>${escapeHtml(error.message)}</p></div>`;
     }
+  }
+
+  await refresh();
+  window.setInterval(refresh, 8000);
+}
+
+async function boot() {
+  const displayMatch = window.location.pathname.match(/^\/display\/([^/]+)$/);
+  if (displayMatch) {
+    await loadDisplayRoute(displayMatch[1]);
     return;
   }
 
-  if (!event.target.classList.contains("toggle")) {
-    return;
+  await loadAdminData();
+  const hash = window.location.hash.replace("#", "");
+  if (hash) {
+    document.querySelector(`.nav-list a[data-page="${hash}"]`)?.click();
   }
+}
 
-  const button = event.target;
-  const enabled = !button.classList.contains("on");
-  button.disabled = true;
-
-  try {
-    await api(`/api/vendors/${button.dataset.vendorId}/autopay`, {
-      method: "POST",
-      body: JSON.stringify({ enabled }),
-    });
-    button.classList.toggle("on", enabled);
-    showToast(`AutoPay ${enabled ? "enabled" : "disabled"}.`);
-  } finally {
-    button.disabled = false;
-  }
-});
-
-billList.addEventListener("click", async (event) => {
-  const billId = event.target.dataset.payBill;
-  if (!billId || event.target.disabled) {
-    return;
-  }
-
-  event.target.disabled = true;
-  await api(`/api/bills/${billId}/pay`, { method: "POST" });
-  await loadApp();
-  showToast("Bill marked paid in local demo mode.");
-});
-
-vendorForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const submitButton = vendorForm.querySelector("button");
-  submitButton.disabled = true;
-  const formData = new FormData(vendorForm);
-
-  try {
-    await api("/api/vendors", {
-      method: "POST",
-      body: JSON.stringify({
-        companyName: formData.get("companyName"),
-        category: formData.get("category"),
-        accountNumber: formData.get("accountNumber"),
-        website: formData.get("website"),
-        paymentMethod: formData.get("paymentMethod"),
-        paymentSchedule: formData.get("paymentSchedule"),
-        maxPayment: formData.get("maxPayment"),
-      }),
-    });
-
-    vendorForm.reset();
-    vendorForm.elements.paymentMethod.value = "Operating Checking";
-    vendorForm.elements.paymentSchedule.value = "Manual approval";
-    await loadApp();
-    showToast("Vendor saved.");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    submitButton.disabled = false;
-  }
-});
-
-billForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const submitButton = billForm.querySelector("button");
-  submitButton.disabled = true;
-  const formData = new FormData(billForm);
-
-  try {
-    await api("/api/bills", {
-      method: "POST",
-      body: JSON.stringify({
-        vendorId: formData.get("vendorId"),
-        amount: formData.get("amount"),
-        dueDate: formData.get("dueDate"),
-        invoiceNumber: formData.get("invoiceNumber"),
-        status: formData.get("status"),
-      }),
-    });
-
-    billForm.reset();
-    if (vendorsCache.length) {
-      billVendorSelect.value = vendorsCache[0].id;
-    }
-    await loadApp();
-    showToast("Bill saved.");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    submitButton.disabled = false;
-  }
-});
-
-accountForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const submitButton = accountForm.querySelector("button");
-  submitButton.disabled = true;
-  const formData = new FormData(accountForm);
-
-  try {
-    await api("/api/accounts", {
-      method: "POST",
-      body: JSON.stringify({
-        name: formData.get("name"),
-        institution: formData.get("institution"),
-        accountType: formData.get("accountType"),
-        balance: formData.get("balance"),
-      }),
-    });
-    accountForm.reset();
-    await loadApp();
-    showToast("Account connected in local demo mode.");
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    submitButton.disabled = false;
-  }
-});
-
-connectAccountButton.addEventListener("click", () => {
-  showPage("settings-page");
-  accountForm.elements.name.focus();
-});
-
-payApprovedButton.addEventListener("click", async () => {
-  payApprovedButton.disabled = true;
-
-  try {
-    const response = await api("/api/pay-approved", { method: "POST" });
-    await loadApp();
-    showToast(`${response.paidCount} approved bill(s) marked paid.`);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    payApprovedButton.disabled = false;
-  }
-});
-
-uploadPdfButton.addEventListener("click", () => {
-  invoiceUpload.click();
-});
-
-invoiceUpload.addEventListener("change", async () => {
-  const file = invoiceUpload.files[0];
-  if (!file) {
-    return;
-  }
-
-  uploadPdfButton.disabled = true;
-  showToast("AI is reading the bill...");
-
-  const detected = await detectUploadFields(file);
-  uploadReviewForm.elements.filename.value = file.name;
-  uploadReviewForm.elements.rawText.value = detected.rawText;
-  fillUploadReviewFields(detected);
-  uploadReviewForm.classList.remove("hidden");
-  uploadReviewForm.elements.rawText.focus();
-  uploadPdfButton.disabled = false;
-
-  if (detected.rawText && detected.vendorName && detected.amount && detected.dueDate) {
-    showToast("AI read vendor, amount, and due date. Review before saving.");
-  } else {
-    showToast("Paste invoice text and tap AI Read Text if fields are missing.");
-  }
-});
-
-readInvoiceTextButton.addEventListener("click", () => {
-  const detected = extractInvoiceTextFields(uploadReviewForm.elements.rawText.value);
-  fillUploadReviewFields(detected);
-
-  if (detected.vendorName || detected.amount || detected.dueDate || detected.invoiceNumber) {
-    showToast("AI read the invoice text. Review before saving.");
-  } else {
-    showToast("I could not find vendor, amount, or due date. Try pasting clearer invoice text.");
-  }
-});
-
-cancelUploadButton.addEventListener("click", () => {
-  uploadReviewForm.reset();
-  uploadReviewForm.classList.add("hidden");
-  invoiceUpload.value = "";
-});
-
-uploadReviewForm.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  const submitButton = uploadReviewForm.querySelector("button[type='submit']");
-  submitButton.disabled = true;
-  const formData = new FormData(uploadReviewForm);
-
-  try {
-    const response = await api("/api/bill-detections", {
-      method: "POST",
-      body: JSON.stringify({
-        filename: formData.get("filename"),
-        rawText: formData.get("rawText"),
-        vendorName: formData.get("vendorName"),
-        amount: formData.get("amount"),
-        dueDate: formData.get("dueDate"),
-        invoiceNumber: formData.get("invoiceNumber"),
-      }),
-    });
-    await loadApp();
-    uploadReviewForm.reset();
-    uploadReviewForm.classList.add("hidden");
-    invoiceUpload.value = "";
-    showToast(`Saved ${response.vendor} invoice for ${response.amount}.`);
-  } catch (error) {
-    showToast(error.message);
-  } finally {
-    submitButton.disabled = false;
-  }
-});
-
-loadApp().catch(() => {
-  addMessage("Start the backend with python3 server.py to load live BillPilot data.", "bot");
-});
-
-const initialLink = [...navLinks].find((link) => link.getAttribute("href") === window.location.hash);
-showPage(initialLink?.dataset.page || "dashboard-page", false);
+boot().catch((error) => showToast(error.message));

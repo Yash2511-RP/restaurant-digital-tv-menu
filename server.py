@@ -3,14 +3,28 @@ from __future__ import annotations
 import json
 import re
 import sqlite3
-from datetime import UTC, date, datetime, timedelta
+import uuid
+from datetime import datetime, timezone
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parent
-DB_PATH = ROOT / "billpilot.db"
+DB_PATH = ROOT / "restaurant_menu.db"
+
+
+def now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def new_id() -> str:
+    return str(uuid.uuid4())
+
+
+def slugify(value: str) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or f"screen-{uuid.uuid4().hex[:6]}"
 
 
 def connect() -> sqlite3.Connection:
@@ -20,884 +34,581 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def row_to_dict(row: sqlite3.Row | None) -> dict | None:
+    if row is None:
+        return None
+    return dict(row)
+
+
+def bool_row(value: object) -> int:
+    return 1 if bool(value) else 0
+
+
+def parse_json(handler: SimpleHTTPRequestHandler) -> dict:
+    length = int(handler.headers.get("Content-Length", "0"))
+    if length == 0:
+        return {}
+    try:
+        return json.loads(handler.rfile.read(length).decode("utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError("Body must be valid JSON") from exc
+
+
+def require(payload: dict, *fields: str) -> None:
+    missing = [field for field in fields if payload.get(field) in (None, "")]
+    if missing:
+        raise ValueError(f"Missing required field: {', '.join(missing)}")
+
+
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(
             """
-            CREATE TABLE IF NOT EXISTS accounts (
-              id INTEGER PRIMARY KEY,
+            CREATE TABLE IF NOT EXISTS categories (
+              id TEXT PRIMARY KEY,
               name TEXT NOT NULL,
-              institution TEXT NOT NULL,
-              account_type TEXT NOT NULL,
-              balance_cents INTEGER NOT NULL,
-              last_synced_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS vendors (
-              id INTEGER PRIMARY KEY,
-              company_name TEXT NOT NULL,
-              category TEXT NOT NULL,
-              account_number TEXT NOT NULL,
-              website TEXT NOT NULL,
-              autopay_enabled INTEGER NOT NULL DEFAULT 0,
-              payment_method TEXT NOT NULL,
-              payment_schedule TEXT NOT NULL,
-              max_payment_cents INTEGER NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS bills (
-              id INTEGER PRIMARY KEY,
-              vendor_id INTEGER NOT NULL REFERENCES vendors(id),
-              amount_cents INTEGER NOT NULL,
-              due_date TEXT NOT NULL,
-              invoice_number TEXT NOT NULL,
-              status TEXT NOT NULL,
-              source TEXT NOT NULL,
-              detected_at TEXT NOT NULL
-            );
-
-            CREATE TABLE IF NOT EXISTS receipts (
-              id INTEGER PRIMARY KEY,
-              bill_id INTEGER REFERENCES bills(id),
-              vendor_name TEXT NOT NULL,
-              document_type TEXT NOT NULL,
-              stored_path TEXT NOT NULL,
+              sort_order INTEGER NOT NULL DEFAULT 0,
               created_at TEXT NOT NULL
             );
 
-            CREATE TABLE IF NOT EXISTS audit_events (
-              id INTEGER PRIMARY KEY,
-              event_type TEXT NOT NULL,
-              detail TEXT NOT NULL,
+            CREATE TABLE IF NOT EXISTS menu_items (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              description TEXT NOT NULL DEFAULT '',
+              category_id TEXT REFERENCES categories(id) ON DELETE SET NULL,
+              price REAL NOT NULL,
+              image_url TEXT NOT NULL DEFAULT '',
+              available INTEGER NOT NULL DEFAULT 1,
+              sort_order INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tv_screens (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              slug TEXT NOT NULL UNIQUE,
+              show_images INTEGER NOT NULL DEFAULT 1,
+              show_sold_out INTEGER NOT NULL DEFAULT 1,
               created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS tv_screen_categories (
+              id TEXT PRIMARY KEY,
+              tv_screen_id TEXT NOT NULL REFERENCES tv_screens(id) ON DELETE CASCADE,
+              category_id TEXT NOT NULL REFERENCES categories(id) ON DELETE CASCADE,
+              UNIQUE(tv_screen_id, category_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS tv_screen_items (
+              id TEXT PRIMARY KEY,
+              tv_screen_id TEXT NOT NULL REFERENCES tv_screens(id) ON DELETE CASCADE,
+              menu_item_id TEXT NOT NULL REFERENCES menu_items(id) ON DELETE CASCADE,
+              UNIQUE(tv_screen_id, menu_item_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS display_settings (
+              id TEXT PRIMARY KEY,
+              tv_screen_id TEXT NOT NULL UNIQUE REFERENCES tv_screens(id) ON DELETE CASCADE,
+              restaurant_name TEXT NOT NULL,
+              background_color TEXT NOT NULL,
+              text_color TEXT NOT NULL,
+              accent_color TEXT NOT NULL,
+              price_color TEXT NOT NULL,
+              title_size INTEGER NOT NULL,
+              item_size INTEGER NOT NULL,
+              price_size INTEGER NOT NULL,
+              logo_url TEXT NOT NULL DEFAULT '',
+              background_image_url TEXT NOT NULL DEFAULT ''
             );
             """
         )
 
-        vendor_count = conn.execute("SELECT COUNT(*) FROM vendors").fetchone()[0]
-        if vendor_count:
+        count = conn.execute("SELECT COUNT(*) FROM categories").fetchone()[0]
+        if count:
             return
 
-        now = utc_now()
-        today = date.today()
-        vendors = [
-            (
-                "City Electric",
-                "Electric Utility",
-                "CE-884921",
-                "https://example.com/city-electric",
-                0,
-                "Operating Checking",
-                "Pay 2 days early",
-                250000,
-            ),
-            (
-                "Metro Water",
-                "Water",
-                "MW-102938",
-                "https://example.com/metro-water",
-                1,
-                "Operating Checking",
-                "Pay on due date",
-                120000,
-            ),
-            (
-                "Frontier Internet",
-                "Internet",
-                "FI-72891",
-                "https://example.com/frontier-internet",
-                1,
-                "Business Credit Card",
-                "Pay 3 days early",
-                60000,
-            ),
-            (
-                "Restaurant Supply Co.",
-                "Food Supplier",
-                "RSC-558201",
-                "https://example.com/restaurant-supply",
-                0,
-                "Operating Checking",
-                "Manual approval",
-                800000,
-            ),
+        created = now()
+        categories = [
+            ("Breakfast", 1),
+            ("Signature Plates", 2),
+            ("Drinks", 3),
+            ("Desserts", 4),
         ]
-        conn.executemany(
-            """
-            INSERT INTO vendors (
-              company_name, category, account_number, website, autopay_enabled,
-              payment_method, payment_schedule, max_payment_cents
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            vendors,
-        )
+        category_ids: dict[str, str] = {}
+        for name, sort_order in categories:
+            category_id = new_id()
+            category_ids[name] = category_id
+            conn.execute(
+                "INSERT INTO categories (id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
+                (category_id, name, sort_order, created),
+            )
 
-        bills = [
-            (1, 192000, today.isoformat(), "INV-4481", "approval_needed", "pdf_upload", now),
-            (2, 92000, today.isoformat(), "MW-2026-0708", "ready_to_pay", "vendor_portal", now),
-            (
-                4,
-                674000,
-                (today + timedelta(days=2)).isoformat(),
-                "RSC-88214",
-                "scheduled",
-                "business_email",
-                now,
-            ),
-            (
-                3,
-                41200,
-                (today + timedelta(days=6)).isoformat(),
-                "FI-72891",
-                "autopay_on",
-                "vendor_portal",
-                now,
-            ),
+        items = [
+            ("Sunrise Tacos", "Scrambled eggs, roasted salsa, queso fresco, cilantro.", "Breakfast", 9.50, "https://images.unsplash.com/photo-1565299585323-38d6b0865b47?auto=format&fit=crop&w=600&q=80", 1, 1),
+            ("Cinnamon French Toast", "Brioche, berries, maple cream, powdered sugar.", "Breakfast", 11.00, "https://images.unsplash.com/photo-1484723091739-30a097e8f929?auto=format&fit=crop&w=600&q=80", 1, 2),
+            ("Smash Burger", "Double patty, cheddar, pickles, house sauce, fries.", "Signature Plates", 14.75, "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?auto=format&fit=crop&w=600&q=80", 1, 1),
+            ("Grilled Chicken Bowl", "Herbed rice, avocado, charred corn, lime crema.", "Signature Plates", 13.25, "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?auto=format&fit=crop&w=600&q=80", 1, 2),
+            ("Spicy Rigatoni", "Tomato cream sauce, chili, parmesan, basil.", "Signature Plates", 16.50, "https://images.unsplash.com/photo-1551183053-bf91a1d81141?auto=format&fit=crop&w=600&q=80", 0, 3),
+            ("House Lemonade", "Fresh lemon, cane sugar, mint.", "Drinks", 4.50, "https://images.unsplash.com/photo-1523371054106-bbf80586c38c?auto=format&fit=crop&w=600&q=80", 1, 1),
+            ("Iced Hibiscus Tea", "Bright hibiscus, citrus, light sweetness.", "Drinks", 4.25, "https://images.unsplash.com/photo-1556679343-c7306c1976bc?auto=format&fit=crop&w=600&q=80", 1, 2),
+            ("Chocolate Lava Cake", "Warm chocolate cake, vanilla ice cream.", "Desserts", 8.75, "https://images.unsplash.com/photo-1606890737304-57a1ca8a5b62?auto=format&fit=crop&w=600&q=80", 1, 1),
         ]
-        conn.executemany(
-            """
-            INSERT INTO bills (
-              vendor_id, amount_cents, due_date, invoice_number, status, source, detected_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """,
-            bills,
-        )
+        for name, description, category, price, image_url, available, sort_order in items:
+            conn.execute(
+                """
+                INSERT INTO menu_items (
+                  id, name, description, category_id, price, image_url, available,
+                  sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    new_id(),
+                    name,
+                    description,
+                    category_ids[category],
+                    price,
+                    image_url,
+                    available,
+                    sort_order,
+                    created,
+                    created,
+                ),
+            )
 
-        conn.executemany(
-            """
-            INSERT INTO accounts (name, institution, account_type, balance_cents, last_synced_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                ("Operating Checking", "Demo Bank", "checking", 8426000, now),
-                ("Tax Savings", "Demo Bank", "savings", 1840000, now),
-                ("Business Rewards Card", "Demo Card", "credit_card", -321000, now),
-            ],
-        )
-
-        conn.executemany(
-            """
-            INSERT INTO receipts (bill_id, vendor_name, document_type, stored_path, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            [
-                (1, "City Electric", "Invoice PDF", "/receipts/city-electric-invoice.pdf", now),
-                (None, "Landlord LLC", "Payment Confirmation", "/receipts/rent-confirmation.pdf", now),
-                (3, "Restaurant Supply Co.", "Invoice", "/receipts/rsc-88214.pdf", now),
-                (2, "Metro Water", "Statement PDF", "/receipts/metro-water.pdf", now),
-            ],
-        )
-
-
-def money(cents: int) -> str:
-    sign = "-" if cents < 0 else ""
-    value = abs(cents) / 100
-    return f"{sign}${value:,.0f}" if cents % 100 == 0 else f"{sign}${value:,.2f}"
-
-
-def cents_from_amount(value: object) -> int:
-    try:
-        amount = float(str(value).replace("$", "").replace(",", "").strip())
-    except ValueError as exc:
-        raise ValueError("Amount must be a number") from exc
-    if amount < 0:
-        raise ValueError("Amount must be positive")
-    return round(amount * 100)
+        screens = [
+            ("Main TV", "main-tv", ["Breakfast", "Signature Plates", "Desserts"]),
+            ("Drinks TV", "drinks-tv", ["Drinks"]),
+        ]
+        for name, slug, category_names in screens:
+            tv_id = new_id()
+            conn.execute(
+                """
+                INSERT INTO tv_screens (id, name, slug, show_images, show_sold_out, created_at)
+                VALUES (?, ?, ?, 1, 1, ?)
+                """,
+                (tv_id, name, slug, created),
+            )
+            insert_default_settings(conn, tv_id)
+            for category_name in category_names:
+                conn.execute(
+                    """
+                    INSERT INTO tv_screen_categories (id, tv_screen_id, category_id)
+                    VALUES (?, ?, ?)
+                    """,
+                    (new_id(), tv_id, category_ids[category_name]),
+                )
 
 
-def deduct_from_operating_cash(conn: sqlite3.Connection, amount_cents: int) -> None:
-    account = conn.execute(
-        "SELECT id FROM accounts WHERE account_type IN ('checking', 'savings') ORDER BY id LIMIT 1"
-    ).fetchone()
-    if account is None:
-        return
-    conn.execute(
-        "UPDATE accounts SET balance_cents = balance_cents - ? WHERE id = ?",
-        (amount_cents, account["id"]),
-    )
-
-
-def create_payment_receipt(conn: sqlite3.Connection, bill_id: int) -> None:
-    row = conn.execute(
-        """
-        SELECT bills.invoice_number, vendors.company_name
-        FROM bills
-        JOIN vendors ON vendors.id = bills.vendor_id
-        WHERE bills.id = ?
-        """,
-        (bill_id,),
-    ).fetchone()
-    if row is None:
-        return
+def insert_default_settings(conn: sqlite3.Connection, tv_screen_id: str) -> None:
     conn.execute(
         """
-        INSERT INTO receipts (bill_id, vendor_name, document_type, stored_path, created_at)
-        VALUES (?, ?, 'Payment Confirmation', ?, ?)
+        INSERT INTO display_settings (
+          id, tv_screen_id, restaurant_name, background_color, text_color, accent_color,
+          price_color, title_size, item_size, price_size, logo_url, background_image_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            bill_id,
-            row["company_name"],
-            f"/receipts/payment-confirmation-{bill_id}.pdf",
-            utc_now(),
+            new_id(),
+            tv_screen_id,
+            "Harbor Table",
+            "#1f1713",
+            "#fff7ed",
+            "#f2b84b",
+            "#8ee08e",
+            72,
+            30,
+            32,
+            "",
+            "",
         ),
     )
 
 
-def simulated_vendor_bill(account_number: str, vendor_name: str) -> dict:
-    seed = sum(ord(char) for char in (account_number or vendor_name))
-    amount_cents = 5000 + (seed % 95000)
-    return {
-        "amount_cents": amount_cents,
-        "due_date": (date.today() + timedelta(days=7 + (seed % 14))).isoformat(),
-        "invoice_number": f"AUTO-{seed}-{datetime.now(UTC).strftime('%H%M%S')}",
-    }
+def list_categories(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM categories ORDER BY sort_order, name").fetchall()
+    return [dict(row) for row in rows]
 
 
-def utc_now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+def list_menu_items(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM menu_items ORDER BY sort_order, name").fetchall()
+    return [normalize_item(row) for row in rows]
 
 
-def status_label(status: str) -> str:
-    labels = {
-        "approval_needed": "Approval needed",
-        "ready_to_pay": "Ready to pay",
-        "scheduled": "Scheduled",
-        "autopay_on": "AutoPay on",
-        "paid": "Paid",
-    }
-    return labels.get(status, status.replace("_", " ").title())
+def normalize_item(row: sqlite3.Row) -> dict:
+    item = dict(row)
+    item["available"] = bool(item["available"])
+    return item
 
 
-def bill_rows(conn: sqlite3.Connection) -> list[dict]:
-    rows = conn.execute(
-        """
-        SELECT bills.*, vendors.company_name, vendors.category
-        FROM bills
-        JOIN vendors ON vendors.id = bills.vendor_id
-        ORDER BY bills.due_date ASC, bills.amount_cents DESC
-        """
-    ).fetchall()
+def normalize_tv(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    tv = dict(row)
+    tv["show_images"] = bool(tv["show_images"])
+    tv["show_sold_out"] = bool(tv["show_sold_out"])
+    tv["category_ids"] = [
+        entry["category_id"]
+        for entry in conn.execute(
+            "SELECT category_id FROM tv_screen_categories WHERE tv_screen_id = ?",
+            (tv["id"],),
+        ).fetchall()
+    ]
+    tv["item_ids"] = [
+        entry["menu_item_id"]
+        for entry in conn.execute(
+            "SELECT menu_item_id FROM tv_screen_items WHERE tv_screen_id = ?",
+            (tv["id"],),
+        ).fetchall()
+    ]
+    return tv
 
-    today = date.today()
-    results = []
-    for row in rows:
-        due = date.fromisoformat(row["due_date"])
-        if due == today:
-            due_label = "Today"
-        elif due == today + timedelta(days=1):
-            due_label = "Tomorrow"
-        else:
-            due_label = due.strftime("%b %-d")
 
-        results.append(
-            {
-                "id": row["id"],
-                "vendor": row["company_name"],
-                "category": row["category"],
-                "amount": money(row["amount_cents"]),
-                "amountCents": row["amount_cents"],
-                "dueDate": row["due_date"],
-                "due": due_label,
-                "invoice": row["invoice_number"],
-                "status": row["status"],
-                "statusLabel": status_label(row["status"]),
-                "source": row["source"],
-                "warning": row["status"] == "approval_needed",
-            }
+def list_tvs(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute("SELECT * FROM tv_screens ORDER BY rowid").fetchall()
+    return [normalize_tv(conn, row) for row in rows]
+
+
+def get_tv(conn: sqlite3.Connection, tv_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM tv_screens WHERE id = ?", (tv_id,)).fetchone()
+    return normalize_tv(conn, row) if row else None
+
+
+def get_settings(conn: sqlite3.Connection, tv_id: str) -> dict | None:
+    row = conn.execute("SELECT * FROM display_settings WHERE tv_screen_id = ?", (tv_id,)).fetchone()
+    return row_to_dict(row)
+
+
+def replace_assignments(conn: sqlite3.Connection, tv_id: str, category_ids: list[str], item_ids: list[str]) -> None:
+    conn.execute("DELETE FROM tv_screen_categories WHERE tv_screen_id = ?", (tv_id,))
+    conn.execute("DELETE FROM tv_screen_items WHERE tv_screen_id = ?", (tv_id,))
+    for category_id in category_ids:
+        conn.execute(
+            "INSERT OR IGNORE INTO tv_screen_categories (id, tv_screen_id, category_id) VALUES (?, ?, ?)",
+            (new_id(), tv_id, category_id),
         )
-    return results
+    for item_id in item_ids:
+        conn.execute(
+            "INSERT OR IGNORE INTO tv_screen_items (id, tv_screen_id, menu_item_id) VALUES (?, ?, ?)",
+            (new_id(), tv_id, item_id),
+        )
 
 
-def dashboard(conn: sqlite3.Connection) -> dict:
-    today = date.today()
-    week_end = today + timedelta(days=7)
-    accounts = conn.execute("SELECT * FROM accounts ORDER BY id").fetchall()
-    bills = conn.execute("SELECT * FROM bills").fetchall()
-
-    cash_cents = sum(
-        row["balance_cents"]
-        for row in accounts
-        if row["account_type"] in {"checking", "savings"}
-    )
-    due_today_cents = sum(
-        row["amount_cents"]
-        for row in bills
-        if row["due_date"] == today.isoformat() and row["status"] != "paid"
-    )
-    due_week_cents = sum(
-        row["amount_cents"]
-        for row in bills
-        if today.isoformat() <= row["due_date"] <= week_end.isoformat()
-        and row["status"] != "paid"
-    )
-    paid_cents = sum(row["amount_cents"] for row in bills if row["status"] == "paid")
-    monthly_cents = sum(row["amount_cents"] for row in bills)
-
-    return {
-        "cashBalance": money(cash_cents),
-        "dueToday": money(due_today_cents),
-        "dueThisWeek": money(due_week_cents),
-        "paidBills": money(paid_cents),
-        "monthlySpending": money(monthly_cents),
-        "projectedCashAfterWeek": money(cash_cents - due_week_cents),
-        "recommendation": (
-            "Approve City Electric only if the amount is expected. Metro Water is inside its "
-            "AutoPay limit and can be paid today."
-        ),
-    }
-
-
-def json_body(handler: SimpleHTTPRequestHandler) -> dict:
-    length = int(handler.headers.get("Content-Length", "0"))
-    if length == 0:
-        return {}
-    raw = handler.rfile.read(length).decode("utf-8")
-    return json.loads(raw)
-
-
-def require_text(payload: dict, field: str) -> str:
-    value = str(payload.get(field, "")).strip()
-    if not value:
-        raise ValueError(f"{field} is required")
-    return value
-
-
-def parse_invoice_date(value: str) -> str:
-    value = value.strip().replace(",", "")
-    numeric = re.fullmatch(r"(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})", value)
-    if numeric:
-        year = numeric.group(3)
-        if len(year) == 2:
-            year = f"20{year}"
-        return f"{year}-{numeric.group(1).zfill(2)}-{numeric.group(2).zfill(2)}"
-
-    iso = re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", value)
-    if iso:
-        return f"{iso.group(1)}-{iso.group(2).zfill(2)}-{iso.group(3).zfill(2)}"
-
-    for fmt in ("%B %d %Y", "%b %d %Y"):
-        try:
-            return datetime.strptime(value, fmt).date().isoformat()
-        except ValueError:
-            pass
-    return ""
-
-
-def extract_invoice_fields(text: str) -> dict:
-    normalized = re.sub(r"[ \t]+", " ", text.replace("\r", "\n"))
-    lines = [line.strip() for line in normalized.splitlines() if line.strip()]
-
-    amount = ""
-    for pattern in (
-        r"(?:amount\s+due|total\s+due|balance\s+due|payment\s+due)[^\d$]{0,30}\$?\s*([\d,]+(?:\.\d{2})?)",
-        r"(?:invoice\s+total|total|amount)[^\d$]{0,30}\$?\s*([\d,]+(?:\.\d{2})?)",
-    ):
-        match = re.search(pattern, normalized, re.I)
-        if match:
-            amount = match.group(1).replace(",", "")
-            break
-    if not amount:
-        matches = re.findall(r"\$\s*([\d,]+(?:\.\d{2})?)", normalized)
-        amount = matches[-1].replace(",", "") if matches else ""
-
-    due_date = ""
-    date_pattern = (
-        r"([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{2,4}|"
-        r"\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|"
-        r"\d{4}-\d{1,2}-\d{1,2})"
-    )
-    for pattern in (rf"(?:due\s+date|payment\s+due|due\s+by)[^\w]{{0,20}}{date_pattern}", date_pattern):
-        match = re.search(pattern, normalized, re.I)
-        if match:
-            due_date = parse_invoice_date(match.group(1))
-            if due_date:
-                break
-
-    invoice_match = re.search(
-        r"(?:invoice\s*(?:number|no\.?|#)|inv\s*#)[^\w-]{0,12}([A-Z0-9-]+)",
-        normalized,
-        re.I,
-    )
-
-    vendor_name = ""
-    for line in lines:
-        if re.match(r"vendor\s*:", line, re.I):
-            vendor_name = re.sub(r"vendor\s*:\s*", "", line, flags=re.I)
-            break
-        if (
-            len(line) <= 60
-            and re.search(r"[A-Za-z]", line)
-            and not re.search(
-                r"invoice|statement|amount|total|balance|date|due|account|page|bill\s+to|ship\s+to",
-                line,
-                re.I,
-            )
-        ):
-            vendor_name = line
-            break
-
-    return {
-        "vendorName": vendor_name,
-        "amount": amount,
-        "dueDate": due_date,
-        "invoiceNumber": invoice_match.group(1) if invoice_match else "",
-    }
-
-
-class BillPilotHandler(SimpleHTTPRequestHandler):
+class Handler(SimpleHTTPRequestHandler):
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
+    def do_GET(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            if path == "/api/categories":
+                return self.send_json(list_categories(connect()))
+            if path == "/api/menu-items":
+                return self.send_json(list_menu_items(connect()))
+            if path == "/api/tv-screens":
+                return self.send_json(list_tvs(connect()))
+            if match := re.fullmatch(r"/api/tv-screens/([^/]+)/settings", path):
+                with connect() as conn:
+                    settings = get_settings(conn, match.group(1))
+                    if not settings:
+                        return self.send_error_json("Settings not found", HTTPStatus.NOT_FOUND)
+                    return self.send_json(settings)
+            if match := re.fullmatch(r"/api/display/([^/]+)", path):
+                return self.send_display(match.group(1))
+            if path.startswith("/display/"):
+                return self.serve_index()
+            return super().do_GET()
+        except Exception as exc:  # noqa: BLE001
+            return self.send_error_json(str(exc), HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def do_POST(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            payload = parse_json(self)
+            if path == "/api/categories":
+                return self.create_category(payload)
+            if path == "/api/menu-items":
+                return self.create_menu_item(payload)
+            if path == "/api/tv-screens":
+                return self.create_tv(payload)
+            return self.send_error_json("Endpoint not found", HTTPStatus.NOT_FOUND)
+        except ValueError as exc:
+            return self.send_error_json(str(exc), HTTPStatus.BAD_REQUEST)
+        except sqlite3.IntegrityError as exc:
+            return self.send_error_json(f"Database constraint failed: {exc}", HTTPStatus.BAD_REQUEST)
+
+    def do_PUT(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            payload = parse_json(self)
+            if match := re.fullmatch(r"/api/categories/([^/]+)", path):
+                return self.update_category(match.group(1), payload)
+            if match := re.fullmatch(r"/api/menu-items/([^/]+)", path):
+                return self.update_menu_item(match.group(1), payload)
+            if match := re.fullmatch(r"/api/tv-screens/([^/]+)", path):
+                return self.update_tv(match.group(1), payload)
+            if match := re.fullmatch(r"/api/tv-screens/([^/]+)/settings", path):
+                return self.update_settings(match.group(1), payload)
+            return self.send_error_json("Endpoint not found", HTTPStatus.NOT_FOUND)
+        except ValueError as exc:
+            return self.send_error_json(str(exc), HTTPStatus.BAD_REQUEST)
+        except sqlite3.IntegrityError as exc:
+            return self.send_error_json(f"Database constraint failed: {exc}", HTTPStatus.BAD_REQUEST)
+
+    def do_PATCH(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            payload = parse_json(self)
+            if match := re.fullmatch(r"/api/menu-items/([^/]+)/stock", path):
+                return self.update_stock(match.group(1), payload)
+            return self.send_error_json("Endpoint not found", HTTPStatus.NOT_FOUND)
+        except ValueError as exc:
+            return self.send_error_json(str(exc), HTTPStatus.BAD_REQUEST)
+
+    def do_DELETE(self) -> None:
+        path = urlparse(self.path).path
+        try:
+            if match := re.fullmatch(r"/api/categories/([^/]+)", path):
+                return self.delete_row("categories", match.group(1))
+            if match := re.fullmatch(r"/api/menu-items/([^/]+)", path):
+                return self.delete_row("menu_items", match.group(1))
+            if match := re.fullmatch(r"/api/tv-screens/([^/]+)", path):
+                return self.delete_row("tv_screens", match.group(1))
+            return self.send_error_json("Endpoint not found", HTTPStatus.NOT_FOUND)
+        except Exception as exc:  # noqa: BLE001
+            return self.send_error_json(str(exc), HTTPStatus.INTERNAL_SERVER_ERROR)
+
+    def create_category(self, payload: dict) -> None:
+        require(payload, "name")
+        with connect() as conn:
+            category_id = new_id()
+            conn.execute(
+                "INSERT INTO categories (id, name, sort_order, created_at) VALUES (?, ?, ?, ?)",
+                (category_id, payload["name"].strip(), int(payload.get("sort_order") or 0), now()),
+            )
+            row = conn.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
+        self.send_json(dict(row), HTTPStatus.CREATED)
+
+    def update_category(self, category_id: str, payload: dict) -> None:
+        require(payload, "name")
+        with connect() as conn:
+            conn.execute(
+                "UPDATE categories SET name = ?, sort_order = ? WHERE id = ?",
+                (payload["name"].strip(), int(payload.get("sort_order") or 0), category_id),
+            )
+            row = conn.execute("SELECT * FROM categories WHERE id = ?", (category_id,)).fetchone()
+        if not row:
+            return self.send_error_json("Category not found", HTTPStatus.NOT_FOUND)
+        self.send_json(dict(row))
+
+    def create_menu_item(self, payload: dict) -> None:
+        require(payload, "name", "category_id", "price")
+        timestamp = now()
+        with connect() as conn:
+            item_id = new_id()
+            conn.execute(
+                """
+                INSERT INTO menu_items (
+                  id, name, description, category_id, price, image_url, available,
+                  sort_order, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    item_id,
+                    payload["name"].strip(),
+                    payload.get("description", "").strip(),
+                    payload["category_id"],
+                    float(payload["price"]),
+                    payload.get("image_url", "").strip(),
+                    bool_row(payload.get("available", True)),
+                    int(payload.get("sort_order") or 0),
+                    timestamp,
+                    timestamp,
+                ),
+            )
+            row = conn.execute("SELECT * FROM menu_items WHERE id = ?", (item_id,)).fetchone()
+        self.send_json(normalize_item(row), HTTPStatus.CREATED)
+
+    def update_menu_item(self, item_id: str, payload: dict) -> None:
+        require(payload, "name", "category_id", "price")
+        with connect() as conn:
+            conn.execute(
+                """
+                UPDATE menu_items
+                SET name = ?, description = ?, category_id = ?, price = ?, image_url = ?,
+                    available = ?, sort_order = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    payload["name"].strip(),
+                    payload.get("description", "").strip(),
+                    payload["category_id"],
+                    float(payload["price"]),
+                    payload.get("image_url", "").strip(),
+                    bool_row(payload.get("available", True)),
+                    int(payload.get("sort_order") or 0),
+                    now(),
+                    item_id,
+                ),
+            )
+            row = conn.execute("SELECT * FROM menu_items WHERE id = ?", (item_id,)).fetchone()
+        if not row:
+            return self.send_error_json("Menu item not found", HTTPStatus.NOT_FOUND)
+        self.send_json(normalize_item(row))
+
+    def update_stock(self, item_id: str, payload: dict) -> None:
+        if "available" not in payload:
+            raise ValueError("Missing required field: available")
+        with connect() as conn:
+            conn.execute(
+                "UPDATE menu_items SET available = ?, updated_at = ? WHERE id = ?",
+                (bool_row(payload["available"]), now(), item_id),
+            )
+            row = conn.execute("SELECT * FROM menu_items WHERE id = ?", (item_id,)).fetchone()
+        if not row:
+            return self.send_error_json("Menu item not found", HTTPStatus.NOT_FOUND)
+        self.send_json(normalize_item(row))
+
+    def create_tv(self, payload: dict) -> None:
+        require(payload, "name")
+        tv_id = new_id()
+        slug = slugify(payload.get("slug") or payload["name"])
+        with connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO tv_screens (id, name, slug, show_images, show_sold_out, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    tv_id,
+                    payload["name"].strip(),
+                    slug,
+                    bool_row(payload.get("show_images", True)),
+                    bool_row(payload.get("show_sold_out", True)),
+                    now(),
+                ),
+            )
+            insert_default_settings(conn, tv_id)
+            replace_assignments(conn, tv_id, payload.get("category_ids", []), payload.get("item_ids", []))
+            tv = get_tv(conn, tv_id)
+        self.send_json(tv, HTTPStatus.CREATED)
+
+    def update_tv(self, tv_id: str, payload: dict) -> None:
+        require(payload, "name")
+        slug = slugify(payload.get("slug") or payload["name"])
+        with connect() as conn:
+            conn.execute(
+                """
+                UPDATE tv_screens
+                SET name = ?, slug = ?, show_images = ?, show_sold_out = ?
+                WHERE id = ?
+                """,
+                (
+                    payload["name"].strip(),
+                    slug,
+                    bool_row(payload.get("show_images", True)),
+                    bool_row(payload.get("show_sold_out", True)),
+                    tv_id,
+                ),
+            )
+            replace_assignments(conn, tv_id, payload.get("category_ids", []), payload.get("item_ids", []))
+            tv = get_tv(conn, tv_id)
+        if not tv:
+            return self.send_error_json("TV screen not found", HTTPStatus.NOT_FOUND)
+        self.send_json(tv)
+
+    def update_settings(self, tv_id: str, payload: dict) -> None:
+        require(payload, "restaurant_name", "background_color", "text_color", "accent_color", "price_color")
+        with connect() as conn:
+            conn.execute(
+                """
+                UPDATE display_settings
+                SET restaurant_name = ?, background_color = ?, text_color = ?, accent_color = ?,
+                    price_color = ?, title_size = ?, item_size = ?, price_size = ?,
+                    logo_url = ?, background_image_url = ?
+                WHERE tv_screen_id = ?
+                """,
+                (
+                    payload["restaurant_name"].strip(),
+                    payload["background_color"],
+                    payload["text_color"],
+                    payload["accent_color"],
+                    payload["price_color"],
+                    int(payload.get("title_size") or 72),
+                    int(payload.get("item_size") or 30),
+                    int(payload.get("price_size") or 32),
+                    payload.get("logo_url", "").strip(),
+                    payload.get("background_image_url", "").strip(),
+                    tv_id,
+                ),
+            )
+            settings = get_settings(conn, tv_id)
+        if not settings:
+            return self.send_error_json("Settings not found", HTTPStatus.NOT_FOUND)
+        self.send_json(settings)
+
+    def delete_row(self, table: str, row_id: str) -> None:
+        with connect() as conn:
+            result = conn.execute(f"DELETE FROM {table} WHERE id = ?", (row_id,))
+        if result.rowcount == 0:
+            return self.send_error_json("Record not found", HTTPStatus.NOT_FOUND)
+        self.send_response(HTTPStatus.NO_CONTENT)
+        self.end_headers()
+
+    def send_display(self, slug: str) -> None:
+        with connect() as conn:
+            row = conn.execute("SELECT * FROM tv_screens WHERE slug = ?", (slug,)).fetchone()
+            if not row:
+                return self.send_error_json("TV display not found", HTTPStatus.NOT_FOUND)
+            tv = normalize_tv(conn, row)
+            settings = get_settings(conn, tv["id"])
+            categories = list_categories(conn)
+            items = list_menu_items(conn)
+
+        allowed_categories = set(tv["category_ids"])
+        pinned_items = set(tv["item_ids"])
+
+        if allowed_categories:
+            categories = [category for category in categories if category["id"] in allowed_categories]
+            items = [item for item in items if item["category_id"] in allowed_categories]
+
+        if pinned_items:
+            pinned = [item for item in list_menu_items(connect()) if item["id"] in pinned_items]
+            by_id = {item["id"]: item for item in items}
+            for item in pinned:
+                by_id[item["id"]] = item
+            items = list(by_id.values())
+
+        if not tv["show_sold_out"]:
+            items = [item for item in items if item["available"]]
+
+        items.sort(key=lambda item: (item.get("sort_order") or 0, item["name"]))
+        self.send_json({"tv": tv, "settings": settings, "categories": categories, "items": items})
+
     def send_json(self, payload: object, status: HTTPStatus = HTTPStatus.OK) -> None:
-        body = json.dumps(payload, indent=2).encode("utf-8")
+        body = json.dumps(payload).encode("utf-8")
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
-    def send_error_json(self, message: str, status: HTTPStatus = HTTPStatus.BAD_REQUEST) -> None:
+    def send_error_json(self, message: str, status: HTTPStatus) -> None:
         self.send_json({"error": message}, status)
 
-    def do_GET(self) -> None:
-        path = urlparse(self.path).path
-        if not path.startswith("/api/"):
-            return super().do_GET()
-
-        with connect() as conn:
-            if path == "/api/dashboard":
-                self.send_json(dashboard(conn))
-                return
-            if path == "/api/accounts":
-                rows = conn.execute("SELECT * FROM accounts ORDER BY id").fetchall()
-                self.send_json(
-                    [
-                        {
-                            "id": row["id"],
-                            "name": row["name"],
-                            "institution": row["institution"],
-                            "accountType": row["account_type"],
-                            "balance": money(row["balance_cents"]),
-                            "lastSyncedAt": row["last_synced_at"],
-                        }
-                        for row in rows
-                    ]
-                )
-                return
-            if path == "/api/bills":
-                self.send_json(bill_rows(conn))
-                return
-            if path == "/api/vendors":
-                rows = conn.execute("SELECT * FROM vendors ORDER BY company_name").fetchall()
-                self.send_json(
-                    [
-                        {
-                            "id": row["id"],
-                            "name": row["company_name"],
-                            "category": row["category"],
-                            "accountNumber": row["account_number"],
-                            "website": row["website"],
-                            "autopay": bool(row["autopay_enabled"]),
-                            "paymentMethod": row["payment_method"],
-                            "schedule": row["payment_schedule"],
-                            "limit": money(row["max_payment_cents"]),
-                        }
-                        for row in rows
-                    ]
-                )
-                return
-            if path == "/api/receipts":
-                rows = conn.execute("SELECT * FROM receipts ORDER BY created_at DESC").fetchall()
-                self.send_json([dict(row) for row in rows])
-                return
-
-        self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
-
-    def do_POST(self) -> None:
-        path = urlparse(self.path).path
-
-        with connect() as conn:
-            if path == "/api/accounts":
-                try:
-                    payload = json_body(self)
-                    name = require_text(payload, "name")
-                    institution = require_text(payload, "institution")
-                    account_type = require_text(payload, "accountType")
-                    if account_type not in {"checking", "savings", "credit_card"}:
-                        raise ValueError("Unsupported account type")
-                    balance_cents = cents_from_amount(require_text(payload, "balance"))
-                except ValueError as exc:
-                    self.send_error_json(str(exc))
-                    return
-
-                cursor = conn.execute(
-                    """
-                    INSERT INTO accounts (
-                      name, institution, account_type, balance_cents, last_synced_at
-                    ) VALUES (?, ?, ?, ?, ?)
-                    """,
-                    (name, institution, account_type, balance_cents, utc_now()),
-                )
-                account_id = cursor.lastrowid
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    ("account_connected", f"Account {account_id} connected: {name}", utc_now()),
-                )
-                self.send_json({"ok": True, "accountId": account_id}, HTTPStatus.CREATED)
-                return
-
-            if path == "/api/pay-approved":
-                rows = conn.execute(
-                    """
-                    SELECT id, amount_cents
-                    FROM bills
-                    WHERE status IN ('ready_to_pay', 'scheduled', 'autopay_on')
-                    """
-                ).fetchall()
-                total_cents = sum(row["amount_cents"] for row in rows)
-                bill_ids = [row["id"] for row in rows]
-
-                if bill_ids:
-                    placeholders = ",".join("?" for _ in bill_ids)
-                    conn.execute(
-                        f"UPDATE bills SET status = 'paid' WHERE id IN ({placeholders})",
-                        bill_ids,
-                    )
-                    deduct_from_operating_cash(conn, total_cents)
-                    for bill_id in bill_ids:
-                        create_payment_receipt(conn, bill_id)
-
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    (
-                        "approved_payments_simulated",
-                        f"{len(bill_ids)} approved bill(s) marked paid",
-                        utc_now(),
-                    ),
-                )
-                self.send_json(
-                    {
-                        "ok": True,
-                        "paidCount": len(bill_ids),
-                        "totalPaid": money(total_cents),
-                    }
-                )
-                return
-
-            if path == "/api/bill-detections":
-                try:
-                    payload = json_body(self)
-                    filename = require_text(payload, "filename")
-                    extracted = extract_invoice_fields(str(payload.get("rawText", "")))
-                    amount_value = str(payload.get("amount", "")).strip() or extracted["amount"]
-                    due_date = str(payload.get("dueDate", "")).strip() or extracted["dueDate"]
-                    invoice_number = (
-                        str(payload.get("invoiceNumber", "")).strip()
-                        or extracted["invoiceNumber"]
-                        or f"UPLOAD-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}"
-                    )
-                    amount_cents = cents_from_amount(amount_value)
-                    if not due_date:
-                        raise ValueError("dueDate is required")
-                    date.fromisoformat(due_date)
-                except ValueError as exc:
-                    self.send_error_json(str(exc))
-                    return
-
-                vendor_name = str(payload.get("vendorName", "")).strip() or extracted["vendorName"]
-                if not vendor_name:
-                    vendor_name = Path(filename).stem.replace("_", " ").replace("-", " ").strip()
-                vendor_name = vendor_name.title() or "Uploaded Invoice"
-                vendor = conn.execute(
-                    "SELECT id, company_name FROM vendors WHERE lower(company_name) = lower(?)",
-                    (vendor_name,),
-                ).fetchone()
-                if vendor is None:
-                    cursor = conn.execute(
-                        """
-                        INSERT INTO vendors (
-                          company_name, category, account_number, website, autopay_enabled,
-                          payment_method, payment_schedule, max_payment_cents
-                        ) VALUES (?, 'Uploaded Invoice', 'Detected', 'https://example.com', 0,
-                          'Operating Checking', 'Manual approval', 500000)
-                        """,
-                        (vendor_name,),
-                    )
-                    vendor_id = cursor.lastrowid
-                else:
-                    vendor_id = vendor["id"]
-
-                cursor = conn.execute(
-                    """
-                    INSERT INTO bills (
-                      vendor_id, amount_cents, due_date, invoice_number, status, source, detected_at
-                    ) VALUES (?, ?, ?, ?, 'approval_needed', 'pdf_upload', ?)
-                    """,
-                    (vendor_id, amount_cents, due_date, invoice_number, utc_now()),
-                )
-                bill_id = cursor.lastrowid
-                conn.execute(
-                    """
-                    INSERT INTO receipts (bill_id, vendor_name, document_type, stored_path, created_at)
-                    VALUES (?, ?, 'Uploaded Invoice', ?, ?)
-                    """,
-                    (bill_id, vendor_name, f"/receipts/{filename}", utc_now()),
-                )
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    ("bill_detected", f"Detected bill {bill_id} from {filename}", utc_now()),
-                )
-                self.send_json(
-                    {
-                        "ok": True,
-                        "billId": bill_id,
-                        "vendor": vendor_name,
-                        "amount": money(amount_cents),
-                    },
-                    HTTPStatus.CREATED,
-                )
-                return
-
-            if path == "/api/vendors":
-                try:
-                    payload = json_body(self)
-                    company_name = require_text(payload, "companyName")
-                    category = require_text(payload, "category")
-                    account_number = str(payload.get("accountNumber", "")).strip() or "Manual"
-                    website = str(payload.get("website", "")).strip() or "https://example.com"
-                    payment_method = (
-                        str(payload.get("paymentMethod", "")).strip() or "Operating Checking"
-                    )
-                    payment_schedule = (
-                        str(payload.get("paymentSchedule", "")).strip() or "Manual approval"
-                    )
-                    max_payment_cents = cents_from_amount(payload.get("maxPayment") or 0)
-                except ValueError as exc:
-                    self.send_error_json(str(exc))
-                    return
-
-                cursor = conn.execute(
-                    """
-                    INSERT INTO vendors (
-                      company_name, category, account_number, website, autopay_enabled,
-                      payment_method, payment_schedule, max_payment_cents
-                    ) VALUES (?, ?, ?, ?, 0, ?, ?, ?)
-                    """,
-                    (
-                        company_name,
-                        category,
-                        account_number,
-                        website,
-                        payment_method,
-                        payment_schedule,
-                        max_payment_cents,
-                    ),
-                )
-                vendor_id = cursor.lastrowid
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    ("vendor_created", f"Vendor {vendor_id} created: {company_name}", utc_now()),
-                )
-                self.send_json({"ok": True, "vendorId": vendor_id}, HTTPStatus.CREATED)
-                return
-
-            if path == "/api/bills":
-                try:
-                    payload = json_body(self)
-                    vendor_id = int(require_text(payload, "vendorId"))
-                    amount_cents = cents_from_amount(require_text(payload, "amount"))
-                    due_date = require_text(payload, "dueDate")
-                    date.fromisoformat(due_date)
-                    invoice_number = require_text(payload, "invoiceNumber")
-                    status = str(payload.get("status", "approval_needed")).strip()
-                    if status not in {"approval_needed", "ready_to_pay", "scheduled"}:
-                        raise ValueError("Unsupported bill status")
-                except ValueError as exc:
-                    self.send_error_json(str(exc))
-                    return
-
-                vendor = conn.execute("SELECT id FROM vendors WHERE id = ?", (vendor_id,)).fetchone()
-                if vendor is None:
-                    self.send_error_json("Vendor not found", HTTPStatus.NOT_FOUND)
-                    return
-
-                cursor = conn.execute(
-                    """
-                    INSERT INTO bills (
-                      vendor_id, amount_cents, due_date, invoice_number, status, source, detected_at
-                    ) VALUES (?, ?, ?, ?, ?, 'manual_entry', ?)
-                    """,
-                    (vendor_id, amount_cents, due_date, invoice_number, status, utc_now()),
-                )
-                bill_id = cursor.lastrowid
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    ("bill_created", f"Bill {bill_id} created from manual entry", utc_now()),
-                )
-                self.send_json({"ok": True, "billId": bill_id}, HTTPStatus.CREATED)
-                return
-
-            vendor_match = re.fullmatch(r"/api/vendors/(\d+)/autopay", path)
-            if vendor_match:
-                payload = json_body(self)
-                enabled = 1 if payload.get("enabled") else 0
-                vendor_id = int(vendor_match.group(1))
-                conn.execute(
-                    "UPDATE vendors SET autopay_enabled = ? WHERE id = ?",
-                    (enabled, vendor_id),
-                )
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    (
-                        "autopay_updated",
-                        f"Vendor {vendor_id} AutoPay set to {bool(enabled)}",
-                        utc_now(),
-                    ),
-                )
-                self.send_json({"ok": True, "vendorId": vendor_id, "autopay": bool(enabled)})
-                return
-
-            fetch_vendor_match = re.fullmatch(r"/api/vendors/(\d+)/fetch-bill", path)
-            if fetch_vendor_match:
-                vendor_id = int(fetch_vendor_match.group(1))
-                vendor = conn.execute("SELECT * FROM vendors WHERE id = ?", (vendor_id,)).fetchone()
-                if vendor is None:
-                    self.send_error_json("Vendor not found", HTTPStatus.NOT_FOUND)
-                    return
-                if not vendor["account_number"] or vendor["account_number"] == "Manual":
-                    self.send_error_json("Add this vendor's account number before fetching bills.")
-                    return
-
-                detected = simulated_vendor_bill(vendor["account_number"], vendor["company_name"])
-                cursor = conn.execute(
-                    """
-                    INSERT INTO bills (
-                      vendor_id, amount_cents, due_date, invoice_number, status, source, detected_at
-                    ) VALUES (?, ?, ?, ?, 'approval_needed', 'vendor_portal', ?)
-                    """,
-                    (
-                        vendor_id,
-                        detected["amount_cents"],
-                        detected["due_date"],
-                        detected["invoice_number"],
-                        utc_now(),
-                    ),
-                )
-                bill_id = cursor.lastrowid
-                conn.execute(
-                    """
-                    INSERT INTO receipts (bill_id, vendor_name, document_type, stored_path, created_at)
-                    VALUES (?, ?, 'Vendor Portal Bill', ?, ?)
-                    """,
-                    (
-                        bill_id,
-                        vendor["company_name"],
-                        f"/receipts/vendor-portal-bill-{bill_id}.pdf",
-                        utc_now(),
-                    ),
-                )
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    (
-                        "vendor_bill_fetched",
-                        f"Fetched bill {bill_id} for vendor {vendor_id}",
-                        utc_now(),
-                    ),
-                )
-                self.send_json(
-                    {
-                        "ok": True,
-                        "billId": bill_id,
-                        "vendor": vendor["company_name"],
-                        "amount": money(detected["amount_cents"]),
-                        "dueDate": detected["due_date"],
-                    },
-                    HTTPStatus.CREATED,
-                )
-                return
-
-            bill_match = re.fullmatch(r"/api/bills/(\d+)/pay", path)
-            if bill_match:
-                bill_id = int(bill_match.group(1))
-                bill = conn.execute(
-                    "SELECT amount_cents, status FROM bills WHERE id = ?",
-                    (bill_id,),
-                ).fetchone()
-                if bill is None:
-                    self.send_error_json("Bill not found", HTTPStatus.NOT_FOUND)
-                    return
-                if bill["status"] != "paid":
-                    deduct_from_operating_cash(conn, bill["amount_cents"])
-                    create_payment_receipt(conn, bill_id)
-                conn.execute("UPDATE bills SET status = 'paid' WHERE id = ?", (bill_id,))
-                conn.execute(
-                    "INSERT INTO audit_events (event_type, detail, created_at) VALUES (?, ?, ?)",
-                    (
-                        "payment_simulated",
-                        f"Bill {bill_id} marked paid in demo mode",
-                        utc_now(),
-                    ),
-                )
-                self.send_json({"ok": True, "billId": bill_id, "status": "paid"})
-                return
-
-            if path == "/api/assistant":
-                payload = json_body(self)
-                question = str(payload.get("question", "")).lower()
-                answer = answer_question(conn, question)
-                self.send_json({"answer": answer})
-                return
-
-        self.send_json({"error": "Not found"}, HTTPStatus.NOT_FOUND)
-
-
-def answer_question(conn: sqlite3.Connection, question: str) -> str:
-    bills = bill_rows(conn)
-    dash = dashboard(conn)
-
-    if "tomorrow" in question and "due" in question:
-        tomorrow = (date.today() + timedelta(days=1)).isoformat()
-        due = [bill for bill in bills if bill["dueDate"] == tomorrow and bill["status"] != "paid"]
-        if not due:
-            return "No unpaid bills are due tomorrow."
-        total = money(sum(bill["amountCents"] for bill in due))
-        names = ", ".join(bill["vendor"] for bill in due)
-        return f"{len(due)} unpaid bill(s) are due tomorrow: {names}, totaling {total}."
-
-    if "utility" in question or "utilities" in question:
-        rows = conn.execute(
-            """
-            SELECT SUM(bills.amount_cents)
-            FROM bills
-            JOIN vendors ON vendors.id = bills.vendor_id
-            WHERE lower(vendors.category) LIKE '%utility%'
-               OR lower(vendors.category) IN ('water', 'internet', 'phone', 'gas')
-            """
-        ).fetchone()
-        return f"Utility spend currently tracked for this month is {money(rows[0] or 0)}."
-
-    if "unpaid" in question or "invoice" in question:
-        unpaid = [bill for bill in bills if bill["status"] != "paid"]
-        total = money(sum(bill["amountCents"] for bill in unpaid))
-        return f"There are {len(unpaid)} unpaid invoice(s), totaling {total}."
-
-    if "cash" in question:
-        return (
-            f"Current cash is {dash['cashBalance']}. After this week's unpaid bills, "
-            f"projected cash is {dash['projectedCashAfterWeek']}."
-        )
-
-    return (
-        "I can answer questions about unpaid invoices, utility spend, due dates, "
-        "projected cash, vendor limits, and receipt records."
-    )
+    def serve_index(self) -> None:
+        index = ROOT / "index.html"
+        body = index.read_bytes()
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def main() -> None:
     init_db()
-    server = ThreadingHTTPServer(("127.0.0.1", 4173), BillPilotHandler)
-    print("BillPilot AI running at http://127.0.0.1:4173")
+    server = ThreadingHTTPServer(("127.0.0.1", 4173), Handler)
+    print("Restaurant Digital TV Menu running at http://127.0.0.1:4173")
     server.serve_forever()
 
 

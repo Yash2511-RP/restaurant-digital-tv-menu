@@ -3,288 +3,252 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>BillPilot AI</title>
-    <link rel="stylesheet" href="./styles.css">
+    <title>Restaurant Digital TV Menu</title>
+    <link rel="stylesheet" href="/styles.css">
   </head>
   <body>
-    <div class="app-shell">
+    <div id="adminApp" class="app-shell">
       <aside class="sidebar" aria-label="Primary navigation">
         <div class="brand">
-          <div class="brand-mark">BP</div>
+          <div class="brand-mark">TV</div>
           <div>
-            <strong>BillPilot AI</strong>
-            <span>AI bill operations</span>
+            <strong>MenuCast</strong>
+            <span>Digital TV menus</span>
           </div>
         </div>
 
         <nav class="nav-list">
-          <a class="active" href="#dashboard" data-page="dashboard-page">Dashboard</a>
-          <a href="#bills" data-page="bills-page">Bills</a>
-          <a href="#vendors" data-page="vendors-page">Vendors</a>
-          <a href="#cashflow" data-page="cashflow-page">Cash Flow</a>
-          <a href="#vault" data-page="vault-page">Receipt Vault</a>
-          <a href="#settings" data-page="settings-page">Automation</a>
-          <a href="#assistant" data-page="assistant-page">Assistant</a>
+          <a class="active" href="#dashboard" data-page="dashboard">Dashboard</a>
+          <a href="#menu-items" data-page="menu-items">Menu Items</a>
+          <a href="#categories" data-page="categories">Categories</a>
+          <a href="#tv-screens" data-page="tv-screens">TV Screens</a>
+          <a href="#design-settings" data-page="design-settings">Design</a>
+          <a href="#preview" data-page="preview">Preview</a>
         </nav>
 
         <div class="side-panel">
-          <span class="eyebrow">Automation status</span>
-          <strong>12 vendors monitored</strong>
-          <p>AutoPay is enabled for approved vendors with payment limits.</p>
+          <span class="eyebrow">TV display</span>
+          <strong id="activeTvLink">Select a TV</strong>
+          <p>Open a display URL on a TV browser, Fire Stick, or smart TV.</p>
         </div>
       </aside>
 
       <main>
         <header class="topbar">
           <div>
-            <p class="eyebrow">Business Command Center</p>
-            <h1>Manage bills, cash, vendors, and payments in one place.</h1>
+            <p class="eyebrow" id="pageEyebrow">Admin Dashboard</p>
+            <h1 id="pageHeading">Manage menus, TVs, and display design.</h1>
           </div>
           <div class="topbar-actions">
-            <button id="connectAccountButton" class="secondary">Connect Account</button>
-            <button id="payApprovedButton">Pay Approved Bills</button>
+            <select id="activeTvSelect" aria-label="Active TV screen"></select>
+            <a id="openDisplayLink" class="button secondary" target="_blank" rel="noreferrer">Open TV</a>
           </div>
         </header>
 
-        <div id="dashboard-page" class="app-page active-page" data-title="Business Command Center" data-heading="Manage bills, cash, vendors, and payments in one place.">
-          <section id="dashboard" class="hero-grid" aria-label="Business dashboard">
-            <article class="metric-card primary">
-              <span>Cash balance</span>
-              <strong>$84,260</strong>
-              <p>Projected $71,430 after scheduled bills this week.</p>
+        <section id="dashboard-page" class="app-page active-page" data-title="Admin Dashboard" data-heading="Manage menus, TVs, and display design.">
+          <div class="metric-grid">
+            <article class="metric-card">
+              <span>Menu items</span>
+              <strong id="itemCount">0</strong>
+              <p>Total dishes and drinks in the system.</p>
+            </article>
+            <article class="metric-card">
+              <span>Categories</span>
+              <strong id="categoryCount">0</strong>
+              <p>Grouped sections available for assignment.</p>
+            </article>
+            <article class="metric-card">
+              <span>TV screens</span>
+              <strong id="tvCount">0</strong>
+              <p>Unique display profiles with their own URLs.</p>
             </article>
             <article class="metric-card urgent">
-              <span>Due today</span>
-              <strong>$2,840</strong>
-              <p>2 bills waiting for approval.</p>
+              <span>Out of stock</span>
+              <strong id="soldOutCount">0</strong>
+              <p>Items hidden or marked based on TV settings.</p>
             </article>
-            <article class="metric-card">
-              <span>Due this week</span>
-              <strong>$12,830</strong>
-              <p>8 bills across utilities, rent, and suppliers.</p>
-            </article>
-            <article class="metric-card">
-              <span>Monthly spending</span>
-              <strong>$48,920</strong>
-              <p>Utilities are 8% higher than last month.</p>
-            </article>
-          </section>
+          </div>
 
-          <section class="content-grid">
+          <div class="content-grid">
             <article class="panel large">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">AI recommendation</p>
-                  <h2>Today’s CFO Note</h2>
+                  <p class="eyebrow">Recent menu state</p>
+                  <h2>Kitchen Board</h2>
                 </div>
               </div>
-              <p class="ai-note" id="aiNote">
-                Pay City Electric today and hold Restaurant Supply Co. until Friday. Your projected
-                cash balance stays above the $65,000 threshold after payroll.
-              </p>
-              <div class="recommendation-list">
-                <span>Large bill alerts and unusual vendor charges appear here.</span>
-                <span>Cash projection updates after bills are added or marked paid.</span>
-                <span>Receipt and tax-prep reminders are tracked from saved documents.</span>
-              </div>
+              <div id="dashboardItemList" class="compact-list"></div>
             </article>
-
             <article class="panel">
               <div class="panel-header">
                 <div>
-                  <p class="eyebrow">Quick actions</p>
-                  <h2>Next Step</h2>
+                  <p class="eyebrow">Quick setup</p>
+                  <h2>Next Steps</h2>
                 </div>
               </div>
-              <div class="recommendation-list">
-                <span>Open Bills to upload or add an invoice.</span>
-                <span>Open Vendors to manage AutoPay limits.</span>
-                <span>Open Automation to add local account balances.</span>
+              <div class="compact-list">
+                <div><strong>1. Add categories</strong><span>Breakfast, entrees, drinks, specials.</span></div>
+                <div><strong>2. Add menu items</strong><span>Use image URLs for food photos.</span></div>
+                <div><strong>3. Assign TVs</strong><span>Choose categories and design settings.</span></div>
               </div>
             </article>
-          </section>
-        </div>
-
-        <div id="bills-page" class="app-page" data-title="Bills" data-heading="Upload, review, approve, and pay business bills.">
-          <section class="content-grid">
-          <article id="bills" class="panel large">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Bill detection</p>
-                <h2>Upcoming Bills</h2>
-              </div>
-              <button id="uploadPdfButton" class="secondary compact">Upload PDF</button>
-              <input id="invoiceUpload" class="visually-hidden" type="file" accept=".pdf,image/*">
-            </div>
-
-            <form id="uploadReviewForm" class="data-form upload-review hidden" aria-label="Review uploaded bill">
-              <input name="filename" type="text" readonly aria-label="Uploaded file name">
-              <textarea name="rawText" class="full-span" rows="5" placeholder="Paste invoice text here, then tap AI Read Text. Example: Vendor, Amount Due, Due Date, Invoice Number."></textarea>
-              <button type="button" id="readInvoiceTextButton">AI Read Text</button>
-              <input name="vendorName" type="text" placeholder="Vendor detected" required>
-              <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
-              <input name="dueDate" type="date" required>
-              <input name="invoiceNumber" type="text" placeholder="Invoice number" required>
-              <button type="submit">Save Uploaded Bill</button>
-              <button type="button" class="secondary" id="cancelUploadButton">Cancel</button>
-            </form>
-
-            <div class="bill-list" id="billList"></div>
-          </article>
-
-          <article class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Manual entry</p>
-                <h2>Add a Bill</h2>
-              </div>
-            </div>
-            <form id="billForm" class="data-form stacked" aria-label="Add bill">
-              <select name="vendorId" required aria-label="Vendor"></select>
-              <input name="amount" type="number" min="0.01" step="0.01" placeholder="Amount" required>
-              <input name="dueDate" type="date" required>
-              <input name="invoiceNumber" type="text" placeholder="Invoice number" required>
-              <select name="status" aria-label="Status">
-                <option value="approval_needed">Approval needed</option>
-                <option value="ready_to_pay">Ready to pay</option>
-                <option value="scheduled">Scheduled</option>
-              </select>
-              <button type="submit">Add Bill</button>
-            </form>
-          </article>
+          </div>
         </section>
-        </div>
 
-        <div id="vendors-page" class="app-page" data-title="Vendors" data-heading="Manage vendors, payment methods, schedules, and AutoPay limits.">
-          <section class="content-grid">
-          <article id="vendors" class="panel large">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Vendor management</p>
-                <h2>Vendors & AutoPay</h2>
+        <section id="menu-items-page" class="app-page" data-title="Menu Manager" data-heading="Create, edit, delete, and stock-control menu items.">
+          <div class="content-grid">
+            <article class="panel large">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Menu management</p>
+                  <h2>Menu Items</h2>
+                </div>
               </div>
-            </div>
-
-            <form id="vendorForm" class="data-form" aria-label="Add vendor">
-              <input name="companyName" type="text" placeholder="Vendor name" required>
-              <input name="category" type="text" placeholder="Category" required>
-              <input name="accountNumber" type="text" placeholder="Account number">
-              <input name="website" type="url" placeholder="Website">
-              <input name="paymentMethod" type="text" placeholder="Payment method" value="Operating Checking">
-              <input name="paymentSchedule" type="text" placeholder="Payment schedule" value="Manual approval">
-              <input name="maxPayment" type="number" min="0" step="0.01" placeholder="Max payment">
-              <button type="submit">Add Vendor</button>
-            </form>
-
-            <div class="vendor-grid" id="vendorGrid"></div>
-          </article>
-          </section>
-        </div>
-
-        <div id="cashflow-page" class="app-page" data-title="Cash Flow" data-heading="See projected cash after upcoming bills and payments.">
-          <section class="content-grid">
-          <article id="cashflow" class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Forecast</p>
-                <h2>Cash Flow</h2>
+              <div id="menuItemList" class="item-list"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Add or edit</p>
+                  <h2 id="menuFormTitle">New Item</h2>
+                </div>
               </div>
-            </div>
-            <div class="chart" aria-label="Cash flow forecast chart">
-              <span style="height: 58%"></span>
-              <span style="height: 72%"></span>
-              <span style="height: 66%"></span>
-              <span style="height: 84%"></span>
-              <span style="height: 61%"></span>
-              <span style="height: 76%"></span>
-            </div>
-            <div class="chart-labels">
-              <span>Mon</span>
-              <span>Tue</span>
-              <span>Wed</span>
-              <span>Thu</span>
-              <span>Fri</span>
-              <span>Sat</span>
-            </div>
-          </article>
+              <form id="menuItemForm" class="data-form stacked">
+                <input type="hidden" name="id">
+                <input name="name" type="text" placeholder="Item name" required>
+                <textarea name="description" rows="3" placeholder="Description"></textarea>
+                <select name="category_id" required aria-label="Category"></select>
+                <input name="price" type="number" min="0" step="0.01" placeholder="Price" required>
+                <input name="image_url" type="url" placeholder="Image URL">
+                <input name="sort_order" type="number" step="1" placeholder="Sort order" value="0">
+                <label class="check-row"><input name="available" type="checkbox" checked> In stock</label>
+                <button type="submit">Save Item</button>
+                <button id="resetMenuForm" class="secondary" type="button">Clear</button>
+              </form>
+            </article>
+          </div>
         </section>
-        </div>
 
-        <div id="settings-page" class="app-page" data-title="Automation" data-heading="Connect local accounts and prepare payment automation settings.">
-          <section class="content-grid">
-          <article id="settings" class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Bank connections</p>
-                <h2>Add Account</h2>
+        <section id="categories-page" class="app-page" data-title="Category Manager" data-heading="Create categories and control display ordering.">
+          <div class="content-grid">
+            <article class="panel large">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Categories</p>
+                  <h2>Menu Sections</h2>
+                </div>
               </div>
-            </div>
-            <form id="accountForm" class="data-form stacked" aria-label="Add account">
-              <input name="name" type="text" placeholder="Account name" required>
-              <input name="institution" type="text" placeholder="Institution" required>
-              <select name="accountType" aria-label="Account type">
-                <option value="checking">Checking</option>
-                <option value="savings">Savings</option>
-                <option value="credit_card">Credit card</option>
-              </select>
-              <input name="balance" type="number" step="0.01" placeholder="Balance" required>
-              <button type="submit">Save Account</button>
-            </form>
-          </article>
-
-          <article class="panel large">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Next integrations</p>
-                <h2>Production Path</h2>
+              <div id="categoryList" class="compact-list"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Add or edit</p>
+                  <h2 id="categoryFormTitle">New Category</h2>
+                </div>
               </div>
-            </div>
-            <div class="recommendation-list">
-              <span>Manual entry first, so real users can test workflows safely.</span>
-              <span>Then Plaid for balances and transactions.</span>
-              <span>Then PDF extraction, approvals, and payment rails.</span>
-            </div>
-          </article>
+              <form id="categoryForm" class="data-form stacked">
+                <input type="hidden" name="id">
+                <input name="name" type="text" placeholder="Category name" required>
+                <input name="sort_order" type="number" step="1" placeholder="Sort order" value="0">
+                <button type="submit">Save Category</button>
+                <button id="resetCategoryForm" class="secondary" type="button">Clear</button>
+              </form>
+            </article>
+          </div>
         </section>
-        </div>
 
-        <div id="vault-page" class="app-page" data-title="Receipt Vault" data-heading="View saved invoices, receipts, and payment confirmations.">
-          <section class="content-grid">
-          <article id="vault" class="panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">Receipt Vault</p>
-                <h2>Recent Documents</h2>
+        <section id="tv-screens-page" class="app-page" data-title="TV Screen Manager" data-heading="Create unique TVs and assign categories or specific items.">
+          <div class="content-grid">
+            <article class="panel large">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">TV profiles</p>
+                  <h2>Screens</h2>
+                </div>
               </div>
-            </div>
-            <ul class="document-list" id="receiptList"></ul>
-          </article>
-          </section>
-        </div>
-
-        <div id="assistant-page" class="app-page" data-title="AI Assistant" data-heading="Ask BillPilot about bills, vendors, spending, and projected cash.">
-          <section class="content-grid">
-          <article class="panel large assistant-panel">
-            <div class="panel-header">
-              <div>
-                <p class="eyebrow">AI Assistant</p>
-                <h2>Ask BillPilot</h2>
+              <div id="tvScreenList" class="tv-grid"></div>
+            </article>
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Add or edit</p>
+                  <h2 id="tvFormTitle">New TV</h2>
+                </div>
               </div>
-            </div>
-            <div class="chat-window" id="chatWindow">
-              <div class="message bot">Ask about unpaid invoices, utility spend, due dates, or projected cash.</div>
-            </div>
-            <form id="assistantForm" class="assistant-form">
-              <input id="assistantInput" type="text" placeholder="What bills are due tomorrow?" aria-label="Ask BillPilot AI">
-              <button type="submit">Ask</button>
-            </form>
-          </article>
+              <form id="tvForm" class="data-form stacked">
+                <input type="hidden" name="id">
+                <input name="name" type="text" placeholder="TV name" required>
+                <input name="slug" type="text" placeholder="URL slug, e.g. main-tv" required>
+                <label class="check-row"><input name="show_images" type="checkbox" checked> Show images</label>
+                <label class="check-row"><input name="show_sold_out" type="checkbox" checked> Show sold out items</label>
+                <div>
+                  <p class="form-label">Assigned categories</p>
+                  <div id="tvCategoryChoices" class="choice-list"></div>
+                </div>
+                <div>
+                  <p class="form-label">Pinned items, optional</p>
+                  <div id="tvItemChoices" class="choice-list"></div>
+                </div>
+                <button type="submit">Save TV</button>
+                <button id="resetTvForm" class="secondary" type="button">Clear</button>
+              </form>
+            </article>
+          </div>
         </section>
-        </div>
+
+        <section id="design-settings-page" class="app-page" data-title="Design Settings" data-heading="Customize each TV's colors, typography, and visibility.">
+          <div class="content-grid">
+            <article class="panel">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Current TV</p>
+                  <h2>Design Controls</h2>
+                </div>
+              </div>
+              <form id="designForm" class="data-form stacked">
+                <input name="restaurant_name" type="text" placeholder="Restaurant name" required>
+                <label>Background <input name="background_color" type="color"></label>
+                <label>Text <input name="text_color" type="color"></label>
+                <label>Accent <input name="accent_color" type="color"></label>
+                <label>Price <input name="price_color" type="color"></label>
+                <label>Title size <input name="title_size" type="number" min="32" max="120" step="1"></label>
+                <label>Item size <input name="item_size" type="number" min="18" max="72" step="1"></label>
+                <label>Price size <input name="price_size" type="number" min="18" max="80" step="1"></label>
+                <input name="logo_url" type="url" placeholder="Logo URL, optional">
+                <input name="background_image_url" type="url" placeholder="Background image URL, optional">
+                <button type="submit">Save Design</button>
+              </form>
+            </article>
+            <article class="panel large">
+              <div class="panel-header">
+                <div>
+                  <p class="eyebrow">Live preview</p>
+                  <h2>Selected TV</h2>
+                </div>
+              </div>
+              <div id="designPreview" class="preview-frame"></div>
+            </article>
+          </div>
+        </section>
+
+        <section id="preview-page" class="app-page" data-title="Preview" data-heading="Preview the exact layout before opening it on the TV.">
+          <div class="panel">
+            <div class="panel-header">
+              <div>
+                <p class="eyebrow">TV match</p>
+                <h2>Display Preview</h2>
+              </div>
+            </div>
+            <div id="mainPreview" class="preview-frame tall"></div>
+          </div>
+        </section>
       </main>
     </div>
 
-    <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <script src="./app.js"></script>
+    <div id="displayApp" class="display-route hidden"></div>
+    <div id="toast" class="toast hidden"></div>
+
+    <script src="/app.js"></script>
   </body>
 </html>
