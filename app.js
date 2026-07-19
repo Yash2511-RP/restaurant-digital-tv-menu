@@ -23,6 +23,12 @@ const menuItemForm = document.querySelector("#menuItemForm");
 const categoryForm = document.querySelector("#categoryForm");
 const tvForm = document.querySelector("#tvForm");
 const designForm = document.querySelector("#designForm");
+const menuImageUpload = document.querySelector("#menuImageUpload");
+const menuImagePreview = document.querySelector("#menuImagePreview");
+const scanImageButton = document.querySelector("#scanImageButton");
+const applyScanButton = document.querySelector("#applyScanButton");
+const scanTextInput = document.querySelector("#scanTextInput");
+const scanStatus = document.querySelector("#scanStatus");
 
 const money = new Intl.NumberFormat("en-US", {
   style: "currency",
@@ -73,8 +79,60 @@ function slugify(value) {
     .replace(/(^-|-$)/g, "");
 }
 
+function titleCase(value) {
+  return String(value || "").replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
+}
+
 function categoryName(id) {
   return state.categories.find((category) => category.id === id)?.name || "Uncategorized";
+}
+
+function setUploadTab(tabName) {
+  document.querySelectorAll("[data-upload-tab]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.uploadTab === tabName);
+  });
+  document.querySelector("#imageUrlTab").classList.toggle("active-upload-panel", tabName === "url");
+  document.querySelector("#imageUploadTab").classList.toggle("active-upload-panel", tabName === "upload");
+}
+
+function renderUploadedImagePreview(src = "") {
+  menuImagePreview.innerHTML = src
+    ? `<img src="${escapeHtml(src)}" alt="Uploaded menu item preview">`
+    : `<span>No image uploaded</span>`;
+}
+
+function parseScanText(text) {
+  const cleaned = String(text || "").replace(/\r/g, "\n").trim();
+  const lines = cleaned
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const priceMatch = cleaned.match(/\$?\s*(\d+(?:\.\d{1,2})?)\b/);
+  const name =
+    lines.find((line) => !/\$?\s*\d+(?:\.\d{1,2})?\b/.test(line) && line.length <= 64) ||
+    lines[0] ||
+    "";
+  const description = lines
+    .filter((line) => line !== name && line !== priceMatch?.[0])
+    .join(" ")
+    .replace(priceMatch?.[0] || "", "")
+    .trim();
+
+  return {
+    name: titleCase(name.replace(/\$?\s*\d+(?:\.\d{1,2})?\b/g, "").trim()),
+    description,
+    price: priceMatch ? Number(priceMatch[1]).toFixed(2) : "",
+  };
+}
+
+function fallbackScanTextFromFile(file) {
+  const baseName = file.name
+    .replace(/\.[^.]+$/, "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b(menu|item|photo|image|scan)\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return baseName ? titleCase(baseName) : "";
 }
 
 function getActiveLocation() {
@@ -521,6 +579,11 @@ function resetMenuForm() {
   menuItemForm.elements.id.value = "";
   menuItemForm.elements.available.checked = true;
   menuItemForm.elements.sort_order.value = "0";
+  scanTextInput.value = "";
+  scanStatus.textContent = "Upload an image, then scan or type/edit the text manually.";
+  menuImageUpload.value = "";
+  renderUploadedImagePreview("");
+  setUploadTab("url");
   document.querySelector("#menuFormTitle").textContent = "New Item";
 }
 
@@ -596,6 +659,9 @@ document.body.addEventListener("click", async (event) => {
       menuItemForm.elements.image_url.value = item.image_url || "";
       menuItemForm.elements.sort_order.value = item.sort_order;
       menuItemForm.elements.available.checked = item.available;
+      scanTextInput.value = [item.name, item.description, money.format(item.price)].filter(Boolean).join("\n");
+      renderUploadedImagePreview(item.image_url || "");
+      setUploadTab(item.image_url?.startsWith("data:image/") ? "upload" : "url");
       document.querySelector("#menuFormTitle").textContent = "Edit Item";
     }
 
@@ -726,6 +792,72 @@ document.querySelector("#resetMenuForm").addEventListener("click", resetMenuForm
 document.querySelector("#resetLocationForm").addEventListener("click", resetLocationForm);
 document.querySelector("#resetCategoryForm").addEventListener("click", resetCategoryForm);
 document.querySelector("#resetTvForm").addEventListener("click", resetTvForm);
+
+document.querySelectorAll("[data-upload-tab]").forEach((button) => {
+  button.addEventListener("click", () => setUploadTab(button.dataset.uploadTab));
+});
+
+menuImageUpload.addEventListener("change", async () => {
+  const file = menuImageUpload.files?.[0];
+  if (!file) {
+    renderUploadedImagePreview("");
+    return;
+  }
+  if (!file.type.startsWith("image/")) {
+    showToast("Please upload an image file");
+    menuImageUpload.value = "";
+    return;
+  }
+
+  const reader = new FileReader();
+  reader.addEventListener("load", () => {
+    const imageDataUrl = String(reader.result || "");
+    menuItemForm.elements.image_url.value = imageDataUrl;
+    renderUploadedImagePreview(imageDataUrl);
+    scanTextInput.value = fallbackScanTextFromFile(file);
+    scanStatus.textContent = "Image uploaded. Edit the scan text, or tap Scan Image if your browser supports text detection.";
+  });
+  reader.readAsDataURL(file);
+});
+
+scanImageButton.addEventListener("click", async () => {
+  const image = menuImagePreview.querySelector("img");
+  if (!image) {
+    showToast("Upload an image first");
+    return;
+  }
+
+  if (!("TextDetector" in window)) {
+    scanStatus.textContent = "This browser does not support native image text detection. You can still edit the scan text manually.";
+    showToast("Scan fallback ready to edit");
+    return;
+  }
+
+  try {
+    const detector = new window.TextDetector();
+    const results = await detector.detect(image);
+    const text = results.map((result) => result.rawValue).filter(Boolean).join("\n");
+    scanTextInput.value = text || scanTextInput.value;
+    scanStatus.textContent = text ? "Scan complete. Review and edit the text before applying." : "No text found. Type the item details manually.";
+  } catch (error) {
+    scanStatus.textContent = "Scan failed in this browser. The uploaded image is saved; edit the text manually.";
+  }
+});
+
+applyScanButton.addEventListener("click", () => {
+  const detected = parseScanText(scanTextInput.value);
+  if (detected.name) {
+    menuItemForm.elements.name.value = detected.name;
+  }
+  if (detected.description) {
+    menuItemForm.elements.description.value = detected.description;
+  }
+  if (detected.price) {
+    menuItemForm.elements.price.value = detected.price;
+  }
+  scanStatus.textContent = "Scan applied to the editable form. Review fields, then save.";
+  showToast("Scan applied");
+});
 
 activeLocationSelect.addEventListener("change", async () => {
   state.activeLocationId = activeLocationSelect.value;

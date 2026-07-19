@@ -276,6 +276,59 @@ main {
   grid-template-columns: 1fr;
 }
 
+.upload-tabs {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.tab-buttons {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.tab-buttons button.active {
+  background: var(--accent);
+  color: white;
+}
+
+.upload-panel {
+  display: none;
+}
+
+.active-upload-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.image-upload-preview {
+  align-items: center;
+  aspect-ratio: 16 / 10;
+  background: #eadac5;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  display: grid;
+  min-height: 150px;
+  overflow: hidden;
+  place-items: center;
+}
+
+.image-upload-preview img {
+  height: 100%;
+  object-fit: cover;
+  width: 100%;
+}
+
+.scan-actions {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 input,
 select,
 textarea {

@@ -183,6 +183,27 @@
                 <select name="category_id" required aria-label="Category"></select>
                 <input name="price" type="number" min="0" step="0.01" placeholder="Price" required>
                 <input name="image_url" type="url" placeholder="Image URL">
+                <div class="upload-tabs" aria-label="Image upload and scan">
+                  <div class="tab-buttons" role="tablist" aria-label="Image options">
+                    <button class="secondary active" type="button" data-upload-tab="url">Image URL</button>
+                    <button class="secondary" type="button" data-upload-tab="upload">Upload & Scan</button>
+                  </div>
+                  <div id="imageUrlTab" class="upload-panel active-upload-panel">
+                    <p class="muted">Paste an image URL above, or switch to upload an image from this laptop.</p>
+                  </div>
+                  <div id="imageUploadTab" class="upload-panel">
+                    <input id="menuImageUpload" type="file" accept="image/*">
+                    <div id="menuImagePreview" class="image-upload-preview">
+                      <span>No image uploaded</span>
+                    </div>
+                    <div class="scan-actions">
+                      <button id="scanImageButton" class="secondary" type="button">Scan Image</button>
+                      <button id="applyScanButton" type="button">Apply Scan to Form</button>
+                    </div>
+                    <textarea id="scanTextInput" rows="5" placeholder="Scanned text appears here. Edit it before applying. Example: Item name, description, $9.99"></textarea>
+                    <p id="scanStatus" class="muted">Upload an image, then scan or type/edit the text manually.</p>
+                  </div>
+                </div>
                 <input name="sort_order" type="number" step="1" placeholder="Sort order" value="0">
                 <label class="check-row"><input name="available" type="checkbox" checked> In stock</label>
                 <button type="submit">Save Item</button>
