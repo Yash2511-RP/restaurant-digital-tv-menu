@@ -620,6 +620,11 @@ document.body.addEventListener("click", async (event) => {
       goToPage(trigger.dataset.page);
     }
 
+    if (action === "show-upload-tab") {
+      setUploadTab("upload");
+      document.querySelector(".upload-tabs")?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+
     if (action === "select-location") {
       state.activeLocationId = id;
       state.activeTvId = null;
@@ -651,6 +656,7 @@ document.body.addEventListener("click", async (event) => {
 
     if (action === "edit-item") {
       const item = state.items.find((entry) => entry.id === id);
+      goToPage("menu-items");
       menuItemForm.elements.id.value = item.id;
       menuItemForm.elements.name.value = item.name;
       menuItemForm.elements.description.value = item.description || "";
@@ -663,6 +669,7 @@ document.body.addEventListener("click", async (event) => {
       renderUploadedImagePreview(item.image_url || "");
       setUploadTab(item.image_url?.startsWith("data:image/") ? "upload" : "url");
       document.querySelector("#menuFormTitle").textContent = "Edit Item";
+      menuItemForm.scrollIntoView({ behavior: "smooth", block: "start" });
     }
 
     if (action === "toggle-stock") {
